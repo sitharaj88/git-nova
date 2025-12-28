@@ -1,4 +1,4 @@
-<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<svg width="128" height="128" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <!-- Modern "Cosmic" Gradient -->
     <linearGradient id="cosmicGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -14,19 +14,29 @@
     </linearGradient>
     
     <!-- Soft Glow/Shadow -->
-    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
       <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.3"/>
     </filter>
   </defs>
   
-  <!-- Background Container -->
-  <rect width="512" height="512" rx="110" fill="url(#cosmicGrad)"/>
+  <!-- Background Container - Full Square -->
+  <rect width="512" height="512" fill="url(#cosmicGrad)"/>
   
   <!-- Glass/Shine overlay -->
   <path d="M0 0 L512 0 L512 200 Q256 250 0 200 Z" fill="#FFFFFF" opacity="0.05"/>
   
   <!-- Main Icon: Pulse Heartbeat + Git Nodes -->
-  <g transform="translate(64, 128)" filter="url(#softGlow)">
+  <!-- Centered: Width ~360, Height ~168. Canvas 512.
+       X_start = (512-360)/2 = 76.
+       Y_start = (512-168)/2 = 172.
+       Original paths were relative to group 0,0.
+       Original Y range (40 to 216). Height = 176.
+       Y center of graphic = (40+216)/2 = 128.
+       We want Y center at 256. 
+       Translate Y = 256 - 128 = 128. (Same as before actually).
+       Let's scale it slightly down to give breathing room.
+  -->
+  <g transform="translate(76, 128)" filter="url(#softGlow)">
     <!-- Pulse Path -->
     <path d="M0 128 
              L50 128 
