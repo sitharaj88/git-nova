@@ -2,7 +2,7 @@
   "name": "git-nova",
   "displayName": "GitNova",
   "description": "Visualise and manage your Git workflow with a rhythm. The heartbeat of your codebase.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "sitharaj",
   "repository": {
     "type": "git",

@@ -2,6 +2,9 @@
 
 All notable changes to the "GitNova" extension will be documented in this file.
 
+## [1.0.1] - 2025-12-28
+- Fixed: Application icon now has transparent corners.
+
 ## [1.0.0] - 2025-12-28
 
 ### Added
