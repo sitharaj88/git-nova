@@ -35,6 +35,9 @@
     "onLanguage:diff",
     "onCommand:gitNova.init",
     "onCommand:gitNova.clone",
+    "onCommand:gitNova.blame.toggleInline",
+    "onCommand:gitNova.worktree.list",
+    "onCommand:gitNova.enterprise.showLogs",
     "onView:gitNova.sourceControl",
     "onView:gitNova.changes",
     "onView:gitNova.branches",
@@ -42,11 +45,35 @@
     "onView:gitNova.stashes",
     "onView:gitNova.remotes",
     "onView:gitNova.tags",
-    "workspaceContains:.git"
+    "workspaceContains:.git",
+    "workspaceContains:.gitmodules"
   ],
   "main": "./out/extension.js",
   "icon": "resources/icons/logo.png",
   "contributes": {
+    "keybindings": [
+      {
+        "command": "gitNova.blame.toggleInline",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "gitNova.commit.useTemplate",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t"
+      },
+      {
+        "command": "gitNova.worktree.list",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w"
+      },
+      {
+        "command": "gitNova.enterprise.showLogs",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -421,6 +448,240 @@
         "title": "Sync",
         "category": "GitNova",
         "icon": "$(sync)"
+      },
+      {
+        "command": "gitNova.blame.toggleInline",
+        "title": "GitNova: Toggle Inline Blame",
+        "category": "GitNova",
+        "icon": "$(person)"
+      },
+      {
+        "command": "gitNova.blame.showFile",
+        "title": "GitNova: Show File Blame",
+        "category": "GitNova",
+        "icon": "$(history)"
+      },
+      {
+        "command": "gitNova.worktree.list",
+        "title": "GitNova: List Worktrees",
+        "category": "GitNova",
+        "icon": "$(folder-library)"
+      },
+      {
+        "command": "gitNova.worktree.create",
+        "title": "GitNova: Create Worktree",
+        "category": "GitNova",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitNova.worktree.remove",
+        "title": "GitNova: Remove Worktree",
+        "category": "GitNova",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gitNova.worktree.openInNewWindow",
+        "title": "GitNova: Open Worktree in New Window",
+        "category": "GitNova",
+        "icon": "$(multiple-windows)"
+      },
+      {
+        "command": "gitNova.commit.useTemplate",
+        "title": "GitNova: Insert Commit Template",
+        "category": "GitNova",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "gitNova.commit.templateWizard",
+        "title": "GitNova: Commit Template Wizard",
+        "category": "GitNova",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "gitNova.enterprise.showLogs",
+        "title": "GitNova: Show Logs",
+        "category": "GitNova",
+        "icon": "$(output)"
+      },
+      {
+        "command": "gitNova.enterprise.showPerformance",
+        "title": "GitNova: Show Performance Report",
+        "category": "GitNova",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "gitNova.enterprise.clearCache",
+        "title": "GitNova: Clear Cache",
+        "category": "GitNova",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "gitNova.submodule.init",
+        "title": "GitNova: Initialize Submodules",
+        "category": "GitNova",
+        "icon": "$(package)"
+      },
+      {
+        "command": "gitNova.submodule.update",
+        "title": "GitNova: Update Submodules",
+        "category": "GitNova",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "gitNova.submodule.add",
+        "title": "GitNova: Add Submodule",
+        "category": "GitNova",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitNova.submodule.remove",
+        "title": "GitNova: Remove Submodule",
+        "category": "GitNova",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gitNova.submodule.sync",
+        "title": "GitNova: Sync Submodules",
+        "category": "GitNova",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "gitNova.lfs.install",
+        "title": "GitNova: Install Git LFS",
+        "category": "GitNova",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gitNova.lfs.track",
+        "title": "GitNova: Track Files with LFS",
+        "category": "GitNova",
+        "icon": "$(file-binary)"
+      },
+      {
+        "command": "gitNova.lfs.untrack",
+        "title": "GitNova: Untrack LFS Files",
+        "category": "GitNova",
+        "icon": "$(file)"
+      },
+      {
+        "command": "gitNova.lfs.pull",
+        "title": "GitNova: Pull LFS Objects",
+        "category": "GitNova",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gitNova.lfs.prune",
+        "title": "GitNova: Prune LFS Objects",
+        "category": "GitNova",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gitNova.reflog.show",
+        "title": "GitNova: Show Reflog",
+        "category": "GitNova",
+        "icon": "$(history)"
+      },
+      {
+        "command": "gitNova.reflog.restore",
+        "title": "GitNova: Restore from Reflog",
+        "category": "GitNova",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "gitNova.bisect.start",
+        "title": "GitNova: Start Bisect",
+        "category": "GitNova",
+        "icon": "$(search)"
+      },
+      {
+        "command": "gitNova.bisect.good",
+        "title": "GitNova: Mark Commit as Good",
+        "category": "GitNova",
+        "icon": "$(check)"
+      },
+      {
+        "command": "gitNova.bisect.bad",
+        "title": "GitNova: Mark Commit as Bad",
+        "category": "GitNova",
+        "icon": "$(x)"
+      },
+      {
+        "command": "gitNova.bisect.reset",
+        "title": "GitNova: End Bisect Session",
+        "category": "GitNova",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "gitNova.sparse.init",
+        "title": "GitNova: Initialize Sparse Checkout",
+        "category": "GitNova",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "gitNova.sparse.set",
+        "title": "GitNova: Set Sparse Checkout Patterns",
+        "category": "GitNova",
+        "icon": "$(list-filter)"
+      },
+      {
+        "command": "gitNova.sparse.disable",
+        "title": "GitNova: Disable Sparse Checkout",
+        "category": "GitNova",
+        "icon": "$(close)"
+      },
+      {
+        "command": "gitNova.patch.create",
+        "title": "GitNova: Create Patch",
+        "category": "GitNova",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "gitNova.patch.apply",
+        "title": "GitNova: Apply Patch",
+        "category": "GitNova",
+        "icon": "$(apply)"
+      },
+      {
+        "command": "gitNova.maintenance.gc",
+        "title": "GitNova: Run Garbage Collection",
+        "category": "GitNova",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gitNova.maintenance.fsck",
+        "title": "GitNova: Verify Repository Integrity",
+        "category": "GitNova",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "gitNova.maintenance.prune",
+        "title": "GitNova: Prune Unreachable Objects",
+        "category": "GitNova",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "gitNova.archive.create",
+        "title": "GitNova: Create Archive",
+        "category": "GitNova",
+        "icon": "$(file-zip)"
+      },
+      {
+        "command": "gitNova.bundle.create",
+        "title": "GitNova: Create Bundle",
+        "category": "GitNova",
+        "icon": "$(package)"
+      },
+      {
+        "command": "gitNova.notes.add",
+        "title": "GitNova: Add Note to Commit",
+        "category": "GitNova",
+        "icon": "$(note)"
+      },
+      {
+        "command": "gitNova.notes.show",
+        "title": "GitNova: Show Commit Notes",
+        "category": "GitNova",
+        "icon": "$(comment)"
       }
     ],
     "views": {
@@ -847,6 +1108,162 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically push after commit"
+        },
+        "gitNova.blame.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline git blame annotations"
+        },
+        "gitNova.blame.dateFormat": {
+          "type": "string",
+          "enum": [
+            "relative",
+            "short",
+            "full"
+          ],
+          "default": "relative",
+          "description": "Date format for blame annotations"
+        },
+        "gitNova.blame.highlightRecent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight recent commits differently"
+        },
+        "gitNova.blame.recentDays": {
+          "type": "number",
+          "default": 7,
+          "description": "Number of days to consider a commit 'recent'"
+        },
+        "gitNova.branchProtection.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable branch protection warnings"
+        },
+        "gitNova.branchProtection.protectedPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "main",
+            "master",
+            "develop",
+            "release/*",
+            "hotfix/*"
+          ],
+          "description": "Branch patterns to protect from direct commits"
+        },
+        "gitNova.branchProtection.requirePullRequest": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require pull request for protected branches"
+        },
+        "gitNova.branchNaming.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable branch naming convention enforcement"
+        },
+        "gitNova.branchNaming.pattern": {
+          "type": "string",
+          "default": "^(feature|bugfix|hotfix|release|chore)/[a-z0-9-]+$",
+          "description": "Regex pattern for valid branch names"
+        },
+        "gitNova.branchNaming.prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "feature/",
+            "bugfix/",
+            "hotfix/",
+            "release/",
+            "chore/"
+          ],
+          "description": "Allowed branch prefixes"
+        },
+        "gitNova.branchNaming.requireTicketNumber": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require ticket number in branch name"
+        },
+        "gitNova.commitMessage.maxSubjectLength": {
+          "type": "number",
+          "default": 72,
+          "description": "Maximum commit subject line length"
+        },
+        "gitNova.commitMessage.requireType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require conventional commit type prefix"
+        },
+        "gitNova.commitMessage.allowedTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "feat",
+            "fix",
+            "docs",
+            "style",
+            "refactor",
+            "perf",
+            "test",
+            "build",
+            "ci",
+            "chore",
+            "revert"
+          ],
+          "description": "Allowed conventional commit types"
+        },
+        "gitNova.performance.enableMetrics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable performance metrics collection"
+        },
+        "gitNova.performance.slowOperationThreshold": {
+          "type": "number",
+          "default": 3000,
+          "description": "Threshold in ms to warn about slow operations"
+        },
+        "gitNova.performance.showCacheStats": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show cache hit/miss statistics"
+        },
+        "gitNova.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable usage telemetry (respects VS Code telemetry settings)"
+        },
+        "gitNova.worktree.autoCleanup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically cleanup orphaned worktrees"
+        },
+        "gitNova.worktree.defaultPath": {
+          "type": "string",
+          "default": "../worktrees",
+          "description": "Default path for creating worktrees"
+        },
+        "gitNova.logging.level": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error",
+            "none"
+          ],
+          "default": "info",
+          "description": "Logging level for GitNova output channel"
+        },
+        "gitNova.logging.includeTimestamp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include timestamp in log messages"
         }
       }
     }
@@ -862,6 +1279,7 @@
     "package": "vsce package"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
