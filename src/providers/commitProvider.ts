@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
-import { Commit } from '../models/commit';
+import { Commit, CommitFile, FileStatus } from '../models/commit';
 import { CommitCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
 
@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 enum TreeItemType {
   Root = 'root',
   Commit = 'commit',
+  File = 'commitFile',
 }
 
 /**
@@ -25,16 +26,6 @@ abstract class CommitTreeItem extends vscode.TreeItem {
   ) {
     super(label, collapsibleState);
     this.contextValue = type;
-  }
-}
-
-/**
- * Root item for commit tree
- */
-class RootItem extends CommitTreeItem {
-  constructor() {
-    super('Commits', TreeItemType.Root, vscode.TreeItemCollapsibleState.Expanded);
-    this.iconPath = new vscode.ThemeIcon('history');
   }
 }
 
@@ -56,7 +47,8 @@ class CommitItem extends CommitTreeItem {
     // Add author and date to description
     description = `${commit.author.name} - ${commit.date.toLocaleDateString()}`;
 
-    super(label, TreeItemType.Commit, vscode.TreeItemCollapsibleState.None);
+    // Collapsed so the user can expand a commit to see its changed files.
+    super(label, TreeItemType.Commit, vscode.TreeItemCollapsibleState.Collapsed);
     this.description = description;
     this.iconPath = new vscode.ThemeIcon('git-commit');
     this.tooltip = this.createTooltip();
@@ -69,6 +61,44 @@ class CommitItem extends CommitTreeItem {
       `Date: ${this.commit.date.toISOString()}`,
       `Message: ${this.commit.message}`,
     ].join('\n');
+  }
+}
+
+/**
+ * A changed file within a commit. Clicking it opens that file's diff for the
+ * commit.
+ */
+class CommitFileItem extends CommitTreeItem {
+  constructor(
+    public readonly commitHash: string,
+    public readonly file: CommitFile
+  ) {
+    super(file.path.split(/[\\/]/).pop() || file.path, TreeItemType.File);
+    this.description = `${statusLabel(file.status)}  +${file.additions} -${file.deletions}`;
+    this.resourceUri = vscode.Uri.file(file.path);
+    this.iconPath = vscode.ThemeIcon.File;
+    this.tooltip = `${file.path}\n${statusLabel(file.status)} · +${file.additions} / -${file.deletions}`;
+    this.command = {
+      command: 'gitNova.commit.file.openDiff',
+      title: 'Open File Diff',
+      arguments: [commitHash, file.path],
+    };
+  }
+}
+
+/** Short human-readable label for a file status. */
+function statusLabel(status: FileStatus): string {
+  switch (status) {
+    case FileStatus.Added:
+      return 'Added';
+    case FileStatus.Deleted:
+      return 'Deleted';
+    case FileStatus.Renamed:
+      return 'Renamed';
+    case FileStatus.Modified:
+      return 'Modified';
+    default:
+      return String(status);
   }
 }
 
@@ -116,7 +146,28 @@ export class CommitProvider implements vscode.TreeDataProvider<CommitTreeItem> {
       return await this.getCommitItems();
     }
 
+    // Expanding a commit lists the files it changed
+    if (element instanceof CommitItem) {
+      return await this.getCommitFileItems(element.commit.hash);
+    }
+
     return [];
+  }
+
+  /**
+   * Get the changed-file items for a commit (lazily loaded on expand).
+   */
+  private async getCommitFileItems(hash: string): Promise<CommitFileItem[]> {
+    try {
+      const detail = await this.gitService.getCommit(hash);
+      if (!detail.files || detail.files.length === 0) {
+        return [];
+      }
+      return detail.files.map(file => new CommitFileItem(hash, file));
+    } catch (error) {
+      logger.error(`Failed to load files for commit ${hash}`, error);
+      return [];
+    }
   }
 
   /**
@@ -192,6 +243,22 @@ export function registerCommitProvider(
 ): CommitProvider {
   const commitProvider = new CommitProvider(gitService, repositoryManager, eventBus);
 
+  // Content provider that serves a file's content at a specific revision,
+  // backing the native side-by-side diff for commit files.
+  const revisionProvider: vscode.TextDocumentContentProvider = {
+    provideTextDocumentContent: async (uri: vscode.Uri) => {
+      const ref = uri.query;
+      const filePath = uri.path.replace(/^\//, '');
+      if (!ref) {
+        return '';
+      }
+      return gitService.getFileAtRevision(ref, filePath);
+    },
+  };
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('gitnova-rev', revisionProvider)
+  );
+
   // Create tree view
   const treeView = vscode.window.createTreeView('gitNova.commits', {
     treeDataProvider: commitProvider,
@@ -222,8 +289,8 @@ function registerCommitContextMenuCommands(
   context: vscode.ExtensionContext,
   commitProvider: CommitProvider,
   gitService: GitService,
-  repositoryManager: RepositoryManager,
-  eventBus: EventBus
+  _repositoryManager: RepositoryManager,
+  _eventBus: EventBus
 ): void {
   // Show commit details
   const showCommitCommand = vscode.commands.registerCommand(
@@ -297,6 +364,42 @@ function registerCommitContextMenuCommands(
     }
   );
   context.subscriptions.push(viewChangesCommand);
+
+  // Open a single file's diff for a commit as a native side-by-side diff
+  // (parent revision on the left, commit revision on the right), matching the
+  // built-in Git experience.
+  const openFileDiffCommand = vscode.commands.registerCommand(
+    'gitNova.commit.file.openDiff',
+    async (hash: string, filePath: string) => {
+      if (!hash || !filePath) {
+        return;
+      }
+      try {
+        const fileName = filePath.split(/[\\/]/).pop() || filePath;
+        const left = vscode.Uri.from({
+          scheme: 'gitnova-rev',
+          path: '/' + filePath,
+          query: `${hash}~1`,
+        });
+        const right = vscode.Uri.from({
+          scheme: 'gitnova-rev',
+          path: '/' + filePath,
+          query: hash,
+        });
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          left,
+          right,
+          `${fileName} (${hash.substring(0, 7)})`,
+          { preview: true }
+        );
+      } catch (error) {
+        logger.error('Failed to open commit file diff', error);
+        vscode.window.showErrorMessage(`Failed to open diff: ${error}`);
+      }
+    }
+  );
+  context.subscriptions.push(openFileDiffCommand);
 
   // Copy commit hash
   const copyHashCommand = vscode.commands.registerCommand(

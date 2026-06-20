@@ -4,6 +4,7 @@ import {
   Branch,
   Commit,
   CommitDetail,
+  CommitFile,
   Diff,
   FileDiff,
   FileHistoryEntry,
@@ -433,89 +434,89 @@ export class GitService {
    */
   async getCommit(hash: string): Promise<CommitDetail> {
     logger.debug(`Fetching commit details: ${hash}`);
+    const SEP = '\x1f';
     try {
-      // Get commit details
-      const logResult = await this.git.show([
+      // 1) Metadata only (no diff). Body is last so embedded newlines don't
+      //    interfere with the other fields.
+      const metaOut = await this.git.show([
+        '-s',
+        `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s${SEP}%b`,
         hash,
-        '--pretty=format:%H|%h|%an|%ae|%ad|%s|%b',
-        '--date=iso',
-        '--stat',
       ]);
-      const lines = logResult.split('\n');
+      const metaParts = metaOut.split(SEP);
 
-      // Parse commit metadata
-      const firstLine = lines[0];
-      const parts = firstLine.split('|');
+      // 2) Per-file line stats (machine-readable): "<add>\t<del>\t<path>".
+      const numOut = await this.git.show([hash, '--numstat', '--format=']);
+      // 3) Per-file status letters: "<STATUS>\t<path>" (R/C carry old + new).
+      const nameOut = await this.git.show([hash, '--name-status', '--format=']);
 
-      // Initialize stats
-      let totalAdditions = 0;
-      let totalDeletions = 0;
-      let totalFiles = 0;
-      const files: any[] = [];
-
-      // Parse file changes from stat output
-      let parsingStats = false;
-      for (const line of lines) {
-        if (line.includes(' files changed')) {
-          parsingStats = true;
-          const match = line.match(
-            /(\d+) files? changed, (\d+) insertions?\(\+\), (\d+) deletions?\(-\)/
-          );
-          if (match) {
-            totalFiles = parseInt(match[1], 10);
-            totalAdditions = parseInt(match[2], 10);
-            totalDeletions = parseInt(match[3], 10);
-          }
+      // Build a path -> status map from --name-status.
+      const statusMap = new Map<string, FileStatus>();
+      for (const line of nameOut.split('\n')) {
+        const cols = line.split('\t');
+        if (cols.length < 2 || !cols[0]) {
           continue;
         }
+        const code = cols[0][0];
+        const targetPath = cols[cols.length - 1].trim();
+        statusMap.set(
+          targetPath,
+          code === 'A'
+            ? FileStatus.Added
+            : code === 'D'
+              ? FileStatus.Deleted
+              : code === 'R'
+                ? FileStatus.Renamed
+                : FileStatus.Modified
+        );
+      }
 
-        if (parsingStats && line.trim()) {
-          const fileMatch = line.match(/(.*)\s+\|\s+(\d+)\s+([+-]+)/);
-          if (fileMatch) {
-            const filePath = fileMatch[1].trim();
-            const additions = (fileMatch[3].match(/\+/g) || []).length;
-            const deletions = (fileMatch[3].match(/-/g) || []).length;
-
-            let status: FileStatus = FileStatus.Modified;
-            if (line.includes('new file')) {
-              status = FileStatus.Added;
-            } else if (line.includes('deleted')) {
-              status = FileStatus.Deleted;
-            } else if (line.includes('rename')) {
-              status = FileStatus.Renamed;
-            }
-
-            files.push({
-              path: filePath,
-              status,
-              additions,
-              deletions,
-            });
-          }
+      const files: CommitFile[] = [];
+      let totalAdditions = 0;
+      let totalDeletions = 0;
+      for (const line of numOut.split('\n')) {
+        const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+        if (!m) {
+          continue;
         }
+        const additions = m[1] === '-' ? 0 : parseInt(m[1], 10);
+        const deletions = m[2] === '-' ? 0 : parseInt(m[2], 10);
+        // For renames numstat may show "old => new"; keep the new path.
+        const rawPath = m[3].trim();
+        const path = rawPath.includes(' => ')
+          ? rawPath.replace(/.*\{(.*) => (.*)\}.*/, '$2').replace(/.* => /, '')
+          : rawPath;
+        totalAdditions += additions;
+        totalDeletions += deletions;
+        files.push({
+          path,
+          status: statusMap.get(path) ?? FileStatus.Modified,
+          additions,
+          deletions,
+        });
       }
 
       const commit: CommitDetail = {
-        hash: parts[0],
-        shortHash: parts[1],
+        hash: metaParts[0] || hash,
+        shortHash: metaParts[1] || hash.substring(0, 7),
         author: {
-          name: parts[2],
-          email: parts[3],
+          name: metaParts[2] || '',
+          email: metaParts[3] || '',
         },
-        date: new Date(parts[4]),
-        message: parts[5],
-        body: parts[6] || '',
-        parents: [],
+        date: new Date(metaParts[4] || Date.now()),
+        message: metaParts[6] || '',
+        body: (metaParts[7] || '').trim(),
+        parents: metaParts[5] ? metaParts[5].split(' ').filter(Boolean) : [],
         refs: [],
         files,
         stats: {
           totalAdditions,
           totalDeletions,
-          totalFiles,
+          totalFiles: files.length,
         },
       };
 
-      logger.debug(`Fetched commit details: ${commit.shortHash}`);
+      logger.debug(`Fetched commit details: ${commit.shortHash} (${files.length} files)`);
       return commit;
     } catch (error) {
       logger.error('Failed to fetch commit details', error);
@@ -1265,6 +1266,44 @@ export class GitService {
           String(innerError)
         );
       }
+    }
+  }
+
+  /**
+   * Get the full content of a file as it existed at a given revision
+   * (`git show <ref>:<path>`). Returns an empty string if the file did not
+   * exist at that revision (e.g. the parent of an "added" file).
+   * @param ref - Commit hash or ref
+   * @param filePath - Repository-relative file path
+   */
+  async getFileAtRevision(ref: string, filePath: string): Promise<string> {
+    try {
+      return await this.git.show([`${ref}:${filePath}`]);
+    } catch {
+      // File absent at this revision (added/deleted) — treat as empty side.
+      return '';
+    }
+  }
+
+  /**
+   * Get the raw unified diff for a single file introduced by a commit
+   * (i.e. `git show <hash> -- <file>` with the commit header suppressed).
+   * @param hash - Commit hash
+   * @param filePath - Repository-relative file path
+   * @returns Raw unified diff text for that file in that commit
+   */
+  async getCommitFileDiff(hash: string, filePath: string): Promise<string> {
+    logger.debug(`Fetching commit file diff: ${hash} -- ${filePath}`);
+    try {
+      return await this.git.show([hash, '--format=', '--', filePath]);
+    } catch (error) {
+      logger.error('Failed to fetch commit file diff', error);
+      throw new GitError(
+        `Failed to fetch commit file diff: ${error}`,
+        'show',
+        undefined,
+        String(error)
+      );
     }
   }
 

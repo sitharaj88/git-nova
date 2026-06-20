@@ -21,6 +21,8 @@ All notable changes to the "GitNova" extension will be documented in this file.
 - **Repo Doctor (new, unique)**: `GitNova: Repo Doctor` — a repository health dashboard combining maintenance diagnostics (size, loose objects, integrity/fsck), Git LFS candidate detection, merged-branch and stash hygiene, rule-based recommendations with **one-click remediation**, and an optional **AI deep-analysis** action plan. No mainstream Git extension bundles these signals into a single guided dashboard.
 
 ### Fixed
+- **Performance**: removed a git-status refresh that ran on *every keystroke* and debounced/narrowed the `.git` file watcher — eliminates the refresh storm that made the UI sluggish during typing and Git operations.
+- **Commit History**: commits are now expandable to list their changed files (previously the click did nothing and `getCommit` never parsed files because it read `git --stat` output in the wrong order). Clicking a file now opens a **native side-by-side diff** (parent ↔ commit), matching the built-in Git experience.
 - Aligned all command IDs between `package.json` and their handlers — fixes the `Ctrl/Cmd+Alt+B` (toggle blame) and `Ctrl/Cmd+Alt+L` (show logs) keybindings and several palette commands that previously errored with "command not found".
 - Added handlers for `Show File Blame`, `Commit Template Wizard`, and `Clear Cache`.
 - Resolved all outstanding TypeScript type errors across the codebase (remote quick-picks, commit result mapping, config update typing, changes-cache mutations, source-control tracking branch, deactivation metrics) — the project now type-checks cleanly.
