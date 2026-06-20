@@ -2,7 +2,7 @@
   "name": "git-nova",
   "displayName": "GitNova",
   "description": "Visualise and manage your Git workflow with a rhythm. The heartbeat of your codebase.",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "publisher": "sitharaj",
   "repository": {
     "type": "git",
@@ -17,7 +17,9 @@
     "vscode": "^1.107.0"
   },
   "categories": [
-    "SCM Providers"
+    "SCM Providers",
+    "AI",
+    "Machine Learning"
   ],
   "keywords": [
     "git",
@@ -27,24 +29,17 @@
     "merge",
     "rebase",
     "stash",
-    "diff"
+    "diff",
+    "ai",
+    "ai commit message",
+    "blame",
+    "worktree",
+    "conventional commits"
   ],
   "activationEvents": [
     "onLanguage:git-commit",
     "onLanguage:git-rebase",
     "onLanguage:diff",
-    "onCommand:gitNova.init",
-    "onCommand:gitNova.clone",
-    "onCommand:gitNova.blame.toggleInline",
-    "onCommand:gitNova.worktree.list",
-    "onCommand:gitNova.enterprise.showLogs",
-    "onView:gitNova.sourceControl",
-    "onView:gitNova.changes",
-    "onView:gitNova.branches",
-    "onView:gitNova.commits",
-    "onView:gitNova.stashes",
-    "onView:gitNova.remotes",
-    "onView:gitNova.tags",
     "workspaceContains:.git",
     "workspaceContains:.gitmodules"
   ],
@@ -682,6 +677,102 @@
         "title": "GitNova: Show Commit Notes",
         "category": "GitNova",
         "icon": "$(comment)"
+      },
+      {
+        "command": "gitNova.ai.generateCommitMessage",
+        "title": "GitNova: Generate Commit Message (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "gitNova.ai.explainCommit",
+        "title": "GitNova: Explain Commit (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "gitNova.ai.explainChanges",
+        "title": "GitNova: Explain Current Changes (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "gitNova.ai.resolveConflicts",
+        "title": "GitNova: Resolve Merge Conflicts (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "gitNova.ai.reviewChanges",
+        "title": "GitNova: Review Changes (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "gitNova.ai.setApiKey",
+        "title": "GitNova: Set AI Provider API Key",
+        "category": "GitNova",
+        "icon": "$(key)"
+      },
+      {
+        "command": "gitNova.codeLens.toggle",
+        "title": "GitNova: Toggle Git CodeLens (Authorship)",
+        "category": "GitNova",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "gitNova.github.refresh",
+        "title": "GitNova: Refresh Pull Requests & Issues",
+        "category": "GitNova",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitNova.github.signIn",
+        "title": "GitNova: Sign in to GitHub",
+        "category": "GitNova",
+        "icon": "$(github)"
+      },
+      {
+        "command": "gitNova.github.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "GitNova",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "gitNova.github.checkoutPullRequest",
+        "title": "Checkout Pull Request",
+        "category": "GitNova",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gitNova.github.openIssue",
+        "title": "Open Issue",
+        "category": "GitNova",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "gitNova.github.openInBrowser",
+        "title": "Open in Browser",
+        "category": "GitNova",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "gitNova.visualFileHistory.show",
+        "title": "GitNova: Visual File History",
+        "category": "GitNova",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "gitNova.launchpad.show",
+        "title": "GitNova: Open Launchpad",
+        "category": "GitNova",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "gitNova.commitGraph.show",
+        "title": "GitNova: Open Commit Graph",
+        "category": "GitNova",
+        "icon": "$(git-commit)"
       }
     ],
     "views": {
@@ -727,6 +818,12 @@
           "name": "Tags",
           "icon": "$(tag)",
           "contextualTitle": "GitNova"
+        },
+        {
+          "id": "gitNova.pullRequests",
+          "name": "Pull Requests & Issues",
+          "icon": "$(git-pull-request)",
+          "contextualTitle": "GitNova"
         }
       ]
     },
@@ -760,9 +857,19 @@
           "group": "navigation@3"
         },
         {
-          "command": "gitNova.commit.create",
+          "command": "gitNova.ai.generateCommitMessage",
           "when": "view == gitNova.changes",
           "group": "navigation@0"
+        },
+        {
+          "command": "gitNova.ai.reviewChanges",
+          "when": "view == gitNova.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitNova.commit.create",
+          "when": "view == gitNova.changes",
+          "group": "navigation@2"
         },
         {
           "command": "gitNova.remote.push",
@@ -843,6 +950,42 @@
           "command": "gitNova.refresh",
           "when": "view == gitNova.remotes",
           "group": "navigation@1"
+        },
+        {
+          "command": "gitNova.launchpad.show",
+          "when": "view == gitNova.pullRequests",
+          "group": "navigation@0"
+        },
+        {
+          "command": "gitNova.github.refresh",
+          "when": "view == gitNova.pullRequests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitNova.github.signIn",
+          "when": "view == gitNova.pullRequests",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "gitNova.visualFileHistory.show",
+          "when": "gitNova.hasRepository",
+          "group": "gitnova@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "gitNova.visualFileHistory.show",
+          "when": "gitNova.hasRepository",
+          "group": "gitnova@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "gitNova.visualFileHistory.show",
+          "when": "gitNova.hasRepository && !explorerResourceIsFolder",
+          "group": "gitnova@1"
         }
       ],
       "view/item/context": [
@@ -1005,6 +1148,26 @@
           "command": "gitNova.stash.context.clear",
           "when": "view == gitNova.stashes && viewItem == root",
           "group": "actions@2"
+        },
+        {
+          "command": "gitNova.ai.explainCommit",
+          "when": "view == gitNova.commits && viewItem == commit",
+          "group": "1_ai@1"
+        },
+        {
+          "command": "gitNova.github.checkoutPullRequest",
+          "when": "view == gitNova.pullRequests && viewItem == gitNova.pullRequest",
+          "group": "inline@1"
+        },
+        {
+          "command": "gitNova.github.checkoutPullRequest",
+          "when": "view == gitNova.pullRequests && viewItem == gitNova.pullRequest",
+          "group": "1_pr@1"
+        },
+        {
+          "command": "gitNova.github.openInBrowser",
+          "when": "view == gitNova.pullRequests && (viewItem == gitNova.pullRequest || viewItem == gitNova.issue)",
+          "group": "1_pr@2"
         }
       ]
     },
@@ -1264,12 +1427,65 @@
           "type": "boolean",
           "default": true,
           "description": "Include timestamp in log messages"
+        },
+        "gitNova.ai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-assisted features (commit message generation, commit/change explanations)"
+        },
+        "gitNova.ai.provider": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "openai-compatible"
+          ],
+          "enumDescriptions": [
+            "Use the built-in VS Code Language Model API (GitHub Copilot or any installed chat model). No API key required.",
+            "Use any OpenAI-compatible Chat Completions endpoint (OpenAI, Azure OpenAI, Ollama, LM Studio, Groq, OpenRouter, …)."
+          ],
+          "default": "vscode",
+          "description": "Which AI provider GitNova should use for AI features"
+        },
+        "gitNova.ai.vscodeModelFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred model family for the VS Code provider (e.g. 'gpt-4o', 'claude-3.5-sonnet'). Leave empty to use the first available model."
+        },
+        "gitNova.ai.baseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Base URL for the OpenAI-compatible provider (e.g. http://localhost:11434/v1 for Ollama)"
+        },
+        "gitNova.ai.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model id for the OpenAI-compatible provider (e.g. 'gpt-4o-mini', 'llama3.1')"
+        },
+        "gitNova.ai.conventionalCommits": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask the AI to produce Conventional Commits-formatted messages"
+        },
+        "gitNova.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline Git CodeLens authorship annotations above files and code blocks"
+        },
+        "gitNova.codeLens.showFileAuthors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a file-level CodeLens with the most recent change and author count"
+        },
+        "gitNova.codeLens.showSymbols": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a CodeLens above functions, methods and classes with their most recent change"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile -- --production",
     "compile": "node esbuild.config.js",
     "watch": "node esbuild.config.js --watch",
     "pretest": "npm run compile && npm run lint",

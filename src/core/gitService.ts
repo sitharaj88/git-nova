@@ -6,6 +6,7 @@ import {
   CommitDetail,
   Diff,
   FileDiff,
+  FileHistoryEntry,
   Stash,
   GitStatus,
   StatusFile,
@@ -373,6 +374,55 @@ export class GitService {
         undefined,
         String(error)
       );
+    }
+  }
+
+  /**
+   * Get commits enriched with parent hashes and ref names, across all branches.
+   * Powers the interactive Commit Graph workbench (lane layout needs parents;
+   * ref decorations need %D). Unlike {@link getCommits}, this walks all refs.
+   * @param maxCount - Maximum commits to return (default 200)
+   * @returns Newest-first commits with `parents` and `refs` populated
+   */
+  async getGraphCommits(maxCount = 200): Promise<Commit[]> {
+    logger.debug('Fetching commit graph');
+    const SEP = '\x1f';
+    try {
+      const result = await this.git.raw([
+        'log',
+        '--all',
+        '--date-order',
+        `--max-count=${maxCount}`,
+        `--pretty=format:%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%D${SEP}%s`,
+      ]);
+
+      const commits: Commit[] = [];
+      for (const line of result.split('\n').filter(l => l.trim())) {
+        const p = line.split(SEP);
+        if (p.length < 8) {
+          continue;
+        }
+        const refs = p[6]
+          ? p[6]
+              .split(',')
+              .map(r => r.trim().replace(/^HEAD -> /, ''))
+              .filter(Boolean)
+          : [];
+        commits.push({
+          hash: p[0],
+          shortHash: p[1],
+          author: { name: p[2], email: p[3] },
+          date: new Date(p[4]),
+          parents: p[5] ? p[5].split(' ').filter(Boolean) : [],
+          refs,
+          message: p[7],
+        });
+      }
+      logger.debug(`Fetched ${commits.length} graph commits`);
+      return commits;
+    } catch (error) {
+      logger.error('Failed to fetch commit graph', error);
+      throw new GitError(`Failed to fetch commit graph: ${error}`, 'log', undefined, String(error));
     }
   }
 
@@ -1163,6 +1213,118 @@ export class GitService {
         undefined,
         String(error)
       );
+    }
+  }
+
+  /**
+   * Get the raw unified diff text (as produced by `git diff`).
+   * Useful for feeding to AI models or external tooling that needs the
+   * full textual patch rather than the structured {@link FileDiff} form.
+   * @param options.staged - When true, diff the index against HEAD (`--staged`)
+   * @param options.ref - Optional git reference / range to diff against
+   * @returns Raw unified diff text (empty string when there are no changes)
+   */
+  async getRawDiff(options: { staged?: boolean; ref?: string } = {}): Promise<string> {
+    const args: string[] = [];
+    if (options.staged) {
+      args.push('--staged');
+    }
+    if (options.ref) {
+      args.push(options.ref);
+    }
+    logger.debug(`Fetching raw diff: ${args.join(' ') || '(working tree)'}`);
+    try {
+      return await this.git.diff(args);
+    } catch (error) {
+      logger.error('Failed to fetch raw diff', error);
+      throw new GitError(`Failed to fetch raw diff: ${error}`, 'diff', undefined, String(error));
+    }
+  }
+
+  /**
+   * Get the raw unified diff introduced by a single commit.
+   * @param hash - Commit hash (defaults to HEAD)
+   * @returns Raw unified diff text for the commit
+   */
+  async getCommitDiff(hash: string = 'HEAD'): Promise<string> {
+    logger.debug(`Fetching commit diff: ${hash}`);
+    try {
+      // `<hash>^!` expands to `<hash>^ <hash>`, i.e. the changes of this commit only.
+      return await this.git.diff([`${hash}^!`]);
+    } catch (error) {
+      // Root commits have no parent; fall back to diffing against the empty tree.
+      logger.debug(`Commit diff fallback for ${hash} (likely root commit)`);
+      try {
+        return await this.git.show([hash, '--format=']);
+      } catch (innerError) {
+        logger.error('Failed to fetch commit diff', innerError);
+        throw new GitError(
+          `Failed to fetch commit diff: ${innerError}`,
+          'diff',
+          undefined,
+          String(innerError)
+        );
+      }
+    }
+  }
+
+  /**
+   * Get the change history of a single file with per-commit line stats.
+   * Powers the Visual File History timeline (authorship swimlanes + change
+   * magnitude bubbles). Uses `git log --follow --numstat` so renames are tracked.
+   * @param filePath - Repository-relative or absolute path to the file
+   * @returns Newest-first list of commits touching the file, with add/del counts
+   */
+  async getFileHistory(filePath: string): Promise<FileHistoryEntry[]> {
+    logger.debug(`Fetching file history: ${filePath}`);
+    const SEP = '\x1f'; // unit separator — safe field delimiter
+    const REC = '\x1e'; // record separator
+    try {
+      const log = await this.git.raw([
+        'log',
+        '--follow',
+        '--no-merges',
+        `--format=${REC}%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%s`,
+        '--numstat',
+        '--',
+        filePath,
+      ]);
+
+      const entries: FileHistoryEntry[] = [];
+      const records = log.split(REC).filter(r => r.trim());
+
+      for (const record of records) {
+        const lines = record.split('\n');
+        const header = lines[0].split(SEP);
+        if (header.length < 6) {
+          continue;
+        }
+        let additions = 0;
+        let deletions = 0;
+        for (const line of lines.slice(1)) {
+          const m = line.match(/^(\d+|-)\t(\d+|-)\t/);
+          if (m) {
+            additions += m[1] === '-' ? 0 : parseInt(m[1], 10);
+            deletions += m[2] === '-' ? 0 : parseInt(m[2], 10);
+          }
+        }
+        entries.push({
+          hash: header[0],
+          shortHash: header[1],
+          author: header[2],
+          authorEmail: header[3],
+          date: new Date(header[4]),
+          subject: header[5],
+          additions,
+          deletions,
+        });
+      }
+
+      logger.debug(`File history: ${entries.length} commits for ${filePath}`);
+      return entries;
+    } catch (error) {
+      logger.error('Failed to fetch file history', error);
+      throw new GitError(`Failed to fetch file history: ${error}`, 'log', undefined, String(error));
     }
   }
 

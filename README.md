@@ -1,7 +1,7 @@
 # GitNova - Enterprise Git Integration for VS Code
 
 <p align="center">
-  <img src="resources/icons/logo.png" alt="GitNova Logo" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/sitharaj88/git-nova/main/resources/icons/logo.png" alt="GitNova Logo" width="128" height="128">
 </p>
 
 <p align="center">
@@ -34,6 +34,39 @@ A comprehensive, enterprise-grade Git plugin for Visual Studio Code that provide
 - **Tag Management**: Create, delete, and push tags
 - **Status Bar Integration**: Quick access to branch, status, and sync information
 - **Tree Views**: Native VSCode tree views for branches, commits, stashes, remotes, and tags
+
+### 🤖 AI Assistance
+
+Provider-agnostic AI built on the VS Code Language Model API (works with GitHub Copilot out of the box, no API key required) or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, Ollama, LM Studio, Groq, OpenRouter):
+
+- **AI commit messages** — generate Conventional Commits-style messages from your staged diff, mirroring your repository's existing style
+- **Explain commit** — get a concise, reviewer-focused explanation of any commit's changes and risks
+- **Explain current changes** — summarize your working-tree/staged diff before committing
+- **AI merge-conflict resolution** — proposes a merged version of each conflicted file and shows it as a *diff to review before applying*
+- **AI code review** — reviews your diff and *fuses the editor's own linter/compiler diagnostics* into a severity-grouped report
+- **Bring your own key** — API keys stored securely in VS Code SecretStorage, never in settings
+
+### 🔎 Git CodeLens
+
+Inline authorship insight, built on GitNova's blame data:
+
+- File-level lens showing the most recent change and number of authors
+- Per-symbol lens above functions, methods, and classes with their most recent change
+- Click any lens to open the corresponding commit; toggle with `Ctrl/Cmd` palette → *Toggle Git CodeLens*
+
+### 🔀 GitHub Pull Requests & Issues
+
+Collaborate without leaving the editor:
+
+- Dedicated **Pull Requests & Issues** view listing open PRs and issues for your GitHub remote
+- Built-in VS Code GitHub sign-in — no personal access token to manage or store
+- View PR details in-editor, **one-click checkout** of a PR branch, and open PRs/issues in the browser
+- **Launchpad** — a unified hub of your actionable items: PRs awaiting your review, your PRs, and issues assigned to you
+
+### 📊 Visualization
+
+- **Visual File History** — interactive timeline per file with author swimlanes and change-magnitude bubbles
+- **Interactive Commit Graph workbench** — coloured lanes, ref badges, live search, and an embedded details panel with checkout / explain-with-AI / copy actions
 
 ## Enterprise Features
 

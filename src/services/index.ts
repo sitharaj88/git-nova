@@ -10,6 +10,11 @@ export { GitBlameService, gitBlameService } from './gitBlameService';
 export { submoduleManager, SubmoduleStatus } from './submoduleManager';
 export { lfsManager } from './lfsManager';
 export { advancedGitService } from './advancedGitService';
+export { AIService, aiService } from './aiService';
+export type { AiProvider } from './aiService';
+export { GitCodeLensProvider, gitCodeLensProvider } from './gitCodeLensProvider';
+export { GitHubService, gitHubService } from './gitHubService';
+export type { GitHubPullRequest, GitHubIssue, RepoSlug } from './gitHubService';
 
 // Types
 export type { GitNovaError, RecoveryStrategy } from './errorHandler';

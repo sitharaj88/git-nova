@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 
 const isWatch = process.argv.includes('--watch');
+// Minify and drop sourcemaps for production packaging (smaller .vsix, faster startup).
+const isProduction = process.argv.includes('--production') || process.env.NODE_ENV === 'production';
 
 const buildExtension = async () => {
   console.log('Building extension...');
@@ -22,8 +24,9 @@ const buildExtension = async () => {
     external: ['vscode'],
     format: 'cjs',
     platform: 'node',
-    target: 'node16',
-    sourcemap: true,
+    target: 'node18',
+    sourcemap: !isProduction,
+    minify: isProduction,
     logLevel: 'info',
     tsconfig: path.join(__dirname, 'tsconfig.json'),
   });
@@ -52,7 +55,8 @@ const buildWebview = async () => {
     outfile: path.join(__dirname, 'out', 'webview', 'index.js'),
     format: 'iife',
     target: 'es2020',
-    sourcemap: true,
+    sourcemap: !isProduction,
+    minify: isProduction,
     logLevel: 'info',
     loader: {
       '.tsx': 'tsx',

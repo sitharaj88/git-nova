@@ -9,6 +9,21 @@ export interface Author {
 }
 
 /**
+ * One commit in a single file's history, with the line stats for that file.
+ * Used by the Visual File History timeline.
+ */
+export interface FileHistoryEntry {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly author: string;
+  readonly authorEmail: string;
+  readonly date: Date;
+  readonly subject: string;
+  readonly additions: number;
+  readonly deletions: number;
+}
+
+/**
  * Represents a file in a commit
  */
 export interface CommitFile {

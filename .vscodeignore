@@ -10,4 +10,9 @@ esbuild.config.js
 tsconfig.json
 node_modules/**
 **/*.map
-packge-lock.json
+package-lock.json
+**/*.ts
+**/*.tsbuildinfo
+**/*.vsix
+.github/**
+.claude/**

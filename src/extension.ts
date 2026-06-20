@@ -10,6 +10,8 @@ import { registerStashCommands } from './commands/stash';
 import { registerRebaseCommands } from './commands/rebase';
 import { registerMergeCommands } from './commands/merge';
 import { registerRemoteCommands } from './commands/remote';
+import { registerAiCommands } from './commands/ai';
+import { registerGitHubCommands, registerGitHubView } from './commands/github';
 import { registerTreeViews } from './providers';
 import { registerWebviews } from './views';
 import { registerStatusBarItems } from './utils/statusBar';
@@ -30,6 +32,9 @@ import {
   submoduleManager,
   lfsManager,
   advancedGitService,
+  aiService,
+  gitCodeLensProvider,
+  gitHubService,
 } from './services';
 
 /**
@@ -71,6 +76,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     commitTemplateManager.initialize(context);
     worktreeManager.initialize(context, gitService);
     gitBlameService.initialize(context, gitService);
+    aiService.initialize(context);
+    gitCodeLensProvider.initialize(context);
+    gitHubService.initialize(gitService);
 
     // Detect and set active repository
     await detectAndSetActiveRepository(repositoryManager);
@@ -83,6 +91,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerRebaseCommands(context, gitService, repositoryManager, eventBus);
     registerMergeCommands(context, gitService, repositoryManager, eventBus);
     registerRemoteCommands(context, gitService, repositoryManager, eventBus);
+    registerAiCommands(context, gitService, repositoryManager, eventBus);
+    registerGitHubCommands(context, repositoryManager, eventBus);
+    registerGitHubView(context);
 
     // Register global commands (refresh, init, clone)
     registerGlobalCommands(context, gitService, repositoryManager, eventBus);
@@ -94,7 +105,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerTreeViews(context, gitService, repositoryManager, eventBus);
 
     // Register webview providers
-    registerWebviews(context, gitService, eventBus);
+    registerWebviews(context, gitService, repositoryManager, eventBus);
 
     // Register status bar items
     registerStatusBarItems(context, repositoryManager, eventBus);
@@ -188,6 +199,17 @@ function registerEnterpriseCommands(
     // Show logs command
     vscode.commands.registerCommand('gitNova.showLogs', () => {
       logger.show();
+    }),
+
+    // Toggle Git CodeLens authorship annotations
+    vscode.commands.registerCommand('gitNova.codeLens.toggle', async () => {
+      const config = vscode.workspace.getConfiguration('gitNova');
+      const current = config.get<boolean>('codeLens.enabled', true);
+      await config.update('codeLens.enabled', !current, vscode.ConfigurationTarget.Global);
+      gitCodeLensProvider.refresh();
+      vscode.window.showInformationMessage(
+        `GitNova: Git CodeLens ${!current ? 'enabled' : 'disabled'}.`
+      );
     }),
 
     // Show performance report
@@ -588,27 +610,11 @@ function registerGlobalCommands(
   });
   context.subscriptions.push(syncCommand);
 
-  // Open Git Graph command
+  // Open Git Graph command — launches GitNova's interactive Commit Graph workbench
   const openGitGraphCommand = vscode.commands.registerCommand('gitNova.openGitGraph', async () => {
     logger.info('Opening Git Graph...');
     try {
-      // Try to use the external Git Graph extension if available
-      const gitGraphExtension = vscode.extensions.getExtension('mhutchie.git-graph');
-      if (gitGraphExtension) {
-        await vscode.commands.executeCommand('git-graph.view');
-      } else {
-        // Fallback: show commit history in a simple format
-        const commits = await gitService.getCommits({ maxCount: 100 });
-        const content = commits.map(c => 
-          `${c.shortHash} | ${c.author.name} | ${c.date.toLocaleDateString()} | ${c.message}`
-        ).join('\n');
-        
-        const doc = await vscode.workspace.openTextDocument({
-          content: `Git Log\n${'='.repeat(80)}\n\n${content}`,
-          language: 'plaintext',
-        });
-        await vscode.window.showTextDocument(doc);
-      }
+      await vscode.commands.executeCommand('gitNova.commitGraph.show');
     } catch (error) {
       logger.error('Error opening Git Graph', error);
       vscode.window.showErrorMessage(`Failed to open Git Graph: ${error}`);
@@ -630,6 +636,9 @@ export async function deactivate(): Promise<void> {
     await workspaceStateManager.endSession(totalOperations, errorHandler.getErrorHistory().length);
 
     // Dispose enterprise services first
+    gitHubService.dispose();
+    gitCodeLensProvider.dispose();
+    aiService.dispose();
     advancedGitService.dispose();
     submoduleManager.dispose();
     lfsManager.dispose();
