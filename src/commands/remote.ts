@@ -126,8 +126,7 @@ export function registerRemoteCommands(
           branch: b,
         })),
         {
-          placeHolder: 'Select branch to pull',
-          value: currentBranch.name,
+          placeHolder: `Select branch to pull (current: ${currentBranch.name})`,
         }
       );
 
@@ -192,8 +191,7 @@ export function registerRemoteCommands(
           branch: b,
         })),
         {
-          placeHolder: 'Select branch to push',
-          value: currentBranch.name,
+          placeHolder: `Select branch to push (current: ${currentBranch.name})`,
         }
       );
 

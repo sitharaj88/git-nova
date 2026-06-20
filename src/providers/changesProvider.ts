@@ -2,9 +2,12 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
-import { GitStatus } from '../models';
+import { GitStatus, StatusFile } from '../models';
 import { FileStatus as ModelFileStatus } from '../models/commit';
 import { logger } from '../utils/logger';
+
+/** A writable view of GitStatus for building updated cache snapshots. */
+type MutableGitStatus = { -readonly [K in keyof GitStatus]: GitStatus[K] };
 
 /**
  * Tree item types
@@ -157,41 +160,47 @@ export class ChangesProvider implements vscode.TreeDataProvider<ChangesTreeItem>
     this.statusCacheExpiry = Date.now() + this.STATUS_CACHE_TTL_MS;
   }
 
-  private updateStatusCacheAfterStage(filePath: string): void {
+  updateStatusCacheAfterStage(filePath: string): void {
     if (!this.statusCache) {
       return;
     }
 
-    const status = { ...this.statusCache } as GitStatus;
+    // GitStatus and its StatusFile entries are readonly; build new objects/arrays
+    // rather than mutating in place.
+    const status: MutableGitStatus = { ...this.statusCache };
     status.unstaged = status.unstaged.filter(f => f.path !== filePath);
     status.untracked = status.untracked.filter(f => f.path !== filePath);
 
     const file = status.files.find(f => f.path === filePath);
     if (file) {
-      file.indexStatus = ModelFileStatus.Modified;
-      file.worktreeStatus = file.worktreeStatus || ModelFileStatus.Modified;
-      // Move to staged if not already
+      const updated: StatusFile = {
+        ...file,
+        indexStatus: ModelFileStatus.Modified,
+        worktreeStatus: file.worktreeStatus || ModelFileStatus.Modified,
+      };
+      status.files = status.files.map(f => (f.path === filePath ? updated : f));
       if (!status.staged.find(f => f.path === filePath)) {
-        status.staged = status.staged.concat({ ...file });
+        status.staged = status.staged.concat(updated);
       }
     }
 
     this.setStatusCache(status);
   }
 
-  private updateStatusCacheAfterUnstage(filePath: string): void {
+  updateStatusCacheAfterUnstage(filePath: string): void {
     if (!this.statusCache) {
       return;
     }
 
-    const status = { ...this.statusCache } as GitStatus;
+    const status: MutableGitStatus = { ...this.statusCache };
     status.staged = status.staged.filter(f => f.path !== filePath);
 
     const file = status.files.find(f => f.path === filePath);
     if (file) {
-      file.indexStatus = ModelFileStatus.Unmodified;
+      const updated: StatusFile = { ...file, indexStatus: ModelFileStatus.Unmodified };
+      status.files = status.files.map(f => (f.path === filePath ? updated : f));
       if (!status.unstaged.find(f => f.path === filePath)) {
-        status.unstaged = status.unstaged.concat({ ...file });
+        status.unstaged = status.unstaged.concat(updated);
       }
     }
 

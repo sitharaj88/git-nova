@@ -129,7 +129,7 @@ export class ConfigManager {
 
     try {
       const config = vscode.workspace.getConfiguration('gitNova');
-      const updatePromises: Promise<void>[] = [];
+      const updatePromises: Thenable<void>[] = [];
 
       for (const [key, value] of Object.entries(updates)) {
         updatePromises.push(config.update(key, value, vscode.ConfigurationTarget.Global));
@@ -164,7 +164,7 @@ export class ConfigManager {
 
     try {
       const config = vscode.workspace.getConfiguration('gitNova');
-      const updatePromises: Promise<void>[] = [];
+      const updatePromises: Thenable<void>[] = [];
 
       for (const key of Object.keys(DEFAULT_CONFIG) as Array<keyof ExtensionConfig>) {
         updatePromises.push(config.update(key, undefined, vscode.ConfigurationTarget.Global));

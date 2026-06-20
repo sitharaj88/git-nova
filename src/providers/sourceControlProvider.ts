@@ -164,7 +164,7 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
       // Sync status
       const ahead = currentBranch.ahead || 0;
       const behind = currentBranch.behind || 0;
-      items.push(new SyncStatusItem(ahead, behind, currentBranch.tracking));
+      items.push(new SyncStatusItem(ahead, behind, currentBranch.trackingBranch?.name));
 
       // Last commit
       try {

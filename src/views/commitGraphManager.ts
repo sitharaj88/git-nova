@@ -213,8 +213,6 @@ export class CommitGraphManager {
 
     // Assign a lane to each commit (simple parent-following layout).
     function computeLanes(list) {
-      const index = {};
-      list.forEach((c,i) => index[c.hash] = i);
       const lanes = [];          // active lane -> expected next hash
       const pos = {};            // hash -> {lane, color}
       list.forEach(c => {

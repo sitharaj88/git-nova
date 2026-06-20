@@ -68,6 +68,17 @@ Collaborate without leaving the editor:
 - **Visual File History** — interactive timeline per file with author swimlanes and change-magnitude bubbles
 - **Interactive Commit Graph workbench** — coloured lanes, ref badges, live search, and an embedded details panel with checkout / explain-with-AI / copy actions
 
+### 🩺 Repo Doctor (unique to GitNova)
+
+A repository health dashboard you won't find in other Git extensions — it fuses GitNova's deep maintenance tooling with AI guidance:
+
+- At-a-glance metrics: `.git` size, loose objects, pack count, integrity (fsck), merged branches, large files, stashes, LFS status
+- Prioritized, **rule-based recommendations with one-click remediation** (run gc, track LFS, run fsck)
+- Optional **AI deep-analysis** that turns the metrics into a concrete maintenance action plan
+- Detects large files that should move to Git LFS, and branches already merged that can be cleaned up
+
+> **What makes GitNova different:** the AI features work through the **VS Code Language Model API (free with Copilot)** *and* fully **local models via Ollama** — so AI commit messages, explanations, conflict resolution, and review can run at **zero cost and fully offline**, unlike the paywalled/credit-metered AI in comparable extensions. GitNova also bundles power-user plumbing most extensions omit — bisect, reflog restore, sparse checkout, submodules, LFS, archive/bundle, git notes, and the Repo Doctor — in one tool.
+
 ## Enterprise Features
 
 ### 🔒 Branch Protection

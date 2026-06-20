@@ -18,6 +18,12 @@ All notable changes to the "GitNova" extension will be documented in this file.
 - **Launchpad (new)**: `GitNova: Open Launchpad` — a unified hub of your actionable items for the current GitHub repo: PRs awaiting your review, your open PRs, and issues assigned to you, with checkout/open actions.
 - **AI merge-conflict resolution (new)**: `GitNova: Resolve Merge Conflicts (AI)` proposes a merged version of each conflicted file and shows it as a **diff to review before applying**; only applied (and staged) on confirmation.
 - **AI code review (new)**: `GitNova: Review Changes (AI)` reviews your diff and **fuses the editor's own linter/compiler diagnostics** into the prompt, returning a severity-grouped Markdown report.
+- **Repo Doctor (new, unique)**: `GitNova: Repo Doctor` — a repository health dashboard combining maintenance diagnostics (size, loose objects, integrity/fsck), Git LFS candidate detection, merged-branch and stash hygiene, rule-based recommendations with **one-click remediation**, and an optional **AI deep-analysis** action plan. No mainstream Git extension bundles these signals into a single guided dashboard.
+
+### Fixed
+- Aligned all command IDs between `package.json` and their handlers — fixes the `Ctrl/Cmd+Alt+B` (toggle blame) and `Ctrl/Cmd+Alt+L` (show logs) keybindings and several palette commands that previously errored with "command not found".
+- Added handlers for `Show File Blame`, `Commit Template Wizard`, and `Clear Cache`.
+- Resolved all outstanding TypeScript type errors across the codebase (remote quick-picks, commit result mapping, config update typing, changes-cache mutations, source-control tracking branch, deactivation metrics) — the project now type-checks cleanly.
 
 ### Changed
 - Production builds are now minified with sourcemaps stripped (smaller `.vsix`, faster startup).

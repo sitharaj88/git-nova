@@ -238,7 +238,7 @@ export class GitService {
           name: result.author?.name || '',
           email: result.author?.email || '',
         },
-        date: new Date(result.date || Date.now()),
+        date: new Date(),
         parents: [],
         refs: [],
       };
@@ -265,12 +265,12 @@ export class GitService {
       const commit: Commit = {
         hash: result.commit || '',
         shortHash: result.commit?.substring(0, 7) || '',
-        message: message || result.message || '',
+        message: message || '',
         author: {
           name: result.author?.name || '',
           email: result.author?.email || '',
         },
-        date: new Date(result.date || Date.now()),
+        date: new Date(),
         parents: [],
         refs: [],
       };

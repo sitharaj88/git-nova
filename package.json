@@ -773,6 +773,12 @@
         "title": "GitNova: Open Commit Graph",
         "category": "GitNova",
         "icon": "$(git-commit)"
+      },
+      {
+        "command": "gitNova.repoHealth.show",
+        "title": "GitNova: Repo Doctor (Repository Health)",
+        "category": "GitNova",
+        "icon": "$(pulse)"
       }
     ],
     "views": {
@@ -855,6 +861,11 @@
           "command": "gitNova.openGitGraph",
           "when": "view == gitNova.sourceControl",
           "group": "navigation@3"
+        },
+        {
+          "command": "gitNova.repoHealth.show",
+          "when": "view == gitNova.sourceControl",
+          "group": "navigation@4"
         },
         {
           "command": "gitNova.ai.generateCommitMessage",

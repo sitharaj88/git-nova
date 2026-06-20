@@ -153,12 +153,13 @@ function registerEnterpriseCommands(
   context: vscode.ExtensionContext,
   gitService: GitService
 ): void {
-  // Blame commands
+  // Blame commands (IDs match package.json contributions)
   context.subscriptions.push(
-    vscode.commands.registerCommand('gitNova.blame.toggle', () => {
+    vscode.commands.registerCommand('gitNova.blame.toggleInline', () => {
       gitBlameService.toggle();
     }),
-    vscode.commands.registerCommand('gitNova.blame.showLine', () => {
+    vscode.commands.registerCommand('gitNova.blame.showFile', () => {
+      gitBlameService.enable();
       gitBlameService.showCurrentLineBlame();
     }),
 
@@ -181,7 +182,7 @@ function registerEnterpriseCommands(
         }
       }
     }),
-    vscode.commands.registerCommand('gitNova.worktree.open', async (worktree) => {
+    vscode.commands.registerCommand('gitNova.worktree.openInNewWindow', async (worktree) => {
       if (worktree) {
         await worktreeManager.openWorktree(worktree);
       }
@@ -195,9 +196,15 @@ function registerEnterpriseCommands(
         await vscode.commands.executeCommand('gitNova.commit.create', message);
       }
     }),
+    vscode.commands.registerCommand('gitNova.commit.templateWizard', async () => {
+      const message = await commitTemplateManager.createCommitMessageWizard();
+      if (message) {
+        await vscode.commands.executeCommand('gitNova.commit.create', message);
+      }
+    }),
 
     // Show logs command
-    vscode.commands.registerCommand('gitNova.showLogs', () => {
+    vscode.commands.registerCommand('gitNova.enterprise.showLogs', () => {
       logger.show();
     }),
 
@@ -213,13 +220,24 @@ function registerEnterpriseCommands(
     }),
 
     // Show performance report
-    vscode.commands.registerCommand('gitNova.showPerformance', async () => {
+    vscode.commands.registerCommand('gitNova.enterprise.showPerformance', async () => {
       const report = performanceMonitor.generateReport();
       const doc = await vscode.workspace.openTextDocument({
         content: JSON.stringify(report, null, 2),
         language: 'json',
       });
       await vscode.window.showTextDocument(doc);
+    }),
+
+    // Clear caches (blame + repository status/data caches)
+    vscode.commands.registerCommand('gitNova.enterprise.clearCache', async () => {
+      gitBlameService.clearCache();
+      gitCodeLensProvider.refresh();
+      const repoManager = getRepositoryManager();
+      if (repoManager) {
+        repoManager.clearCache();
+      }
+      vscode.window.showInformationMessage('GitNova: Caches cleared.');
     }),
 
     // Copy commit SHA
@@ -630,9 +648,8 @@ export async function deactivate(): Promise<void> {
   logger.info('GitNova is deactivating...');
 
   try {
-    // End session tracking
-    const operationMetrics = performanceMonitor.getOperationMetrics();
-    const totalOperations = Array.from(operationMetrics.values()).reduce((sum, m) => sum + m.count, 0);
+    // End session tracking (use recorded metric entries as the operation count)
+    const totalOperations = performanceMonitor.getRecentMetrics(1000000).length;
     await workspaceStateManager.endSession(totalOperations, errorHandler.getErrorHistory().length);
 
     // Dispose enterprise services first
