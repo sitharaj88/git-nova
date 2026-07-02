@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
-import { DiffCommands } from '../constants/commands';
+import { FileDiff } from '../models';
 import { logger } from '../utils/logger';
 
 /**
@@ -10,6 +10,9 @@ import { logger } from '../utils/logger';
 export class DiffViewManager {
   private panel: vscode.WebviewPanel | undefined;
   private disposables: vscode.Disposable[] = [];
+  private panelDisposables: vscode.Disposable[] = [];
+  private mode: 'staged' | 'unstaged' = 'unstaged';
+  private filePath: string | undefined;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -23,11 +26,13 @@ export class DiffViewManager {
   /**
    * Show diff viewer webview
    * @param filePath - Optional file path to view diff for
-   * @param ref - Optional git reference
    */
-  async showDiff(filePath?: string, ref?: string): Promise<void> {
+  async showDiff(filePath?: string): Promise<void> {
+    this.filePath = filePath;
+
     if (this.panel) {
       this.panel.reveal();
+      await this.loadDiff();
       return;
     }
 
@@ -44,11 +49,6 @@ export class DiffViewManager {
 
     this.panel.webview.html = this.getWebviewContent();
     this.setupWebviewListeners();
-
-    // Send initial data if provided
-    if (filePath || ref) {
-      await this.loadDiff(filePath, ref);
-    }
 
     logger.info('Diff viewer webview shown');
   }
@@ -164,6 +164,7 @@ export class DiffViewManager {
       border-radius: var(--radius-lg);
       overflow: hidden;
       animation: fadeIn 0.3s ease;
+      margin-bottom: 16px;
     }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(10px); }
@@ -347,7 +348,7 @@ export class DiffViewManager {
       const message = event.data;
       switch (message.command) {
         case 'showDiff':
-          renderDiff(message.diff);
+          renderDiffs(message.diffs);
           break;
         case 'showEmpty':
           showEmptyState();
@@ -358,13 +359,21 @@ export class DiffViewManager {
       }
     });
 
-    function renderDiff(diff) {
+    function renderDiffs(diffs) {
       const container = document.getElementById('diffContent');
-      if (!diff || !diff.hunks || diff.hunks.length === 0) {
+      if (!diffs || diffs.length === 0) {
         showEmptyState();
         return;
       }
 
+      let html = '';
+      for (const diff of diffs) {
+        html += renderDiff(diff);
+      }
+      container.innerHTML = html;
+    }
+
+    function renderDiff(diff) {
       const additions = diff.hunks.reduce((sum, h) => sum + h.lines.filter(l => l.type === 'added').length, 0);
       const deletions = diff.hunks.reduce((sum, h) => sum + h.lines.filter(l => l.type === 'removed').length, 0);
 
@@ -377,14 +386,14 @@ export class DiffViewManager {
       for (const hunk of diff.hunks) {
         html += '<div class="hunk">';
         html += '<div class="hunk-header">@@ -' + hunk.oldStart + ',' + hunk.oldLines + ' +' + hunk.newStart + ',' + hunk.newLines + ' @@</div>';
-        
+
         let oldLine = hunk.oldStart;
         let newLine = hunk.newStart;
-        
+
         for (const line of hunk.lines) {
           let lineNum = '';
           let lineClass = 'context';
-          
+
           if (line.type === 'added') {
             lineClass = 'addition';
             lineNum = newLine++;
@@ -395,13 +404,13 @@ export class DiffViewManager {
             lineNum = oldLine++;
             newLine++;
           }
-          
+
           html += '<div class="line ' + lineClass + '"><span class="line-number">' + lineNum + '</span><span class="line-content">' + escapeHtml(line.content) + '</span></div>';
         }
         html += '</div>';
       }
       html += '</div></div>';
-      container.innerHTML = html;
+      return html;
     }
 
     function showEmptyState() {
@@ -423,22 +432,44 @@ export class DiffViewManager {
       div.textContent = text || '';
       return div.innerHTML;
     }
+
+    // Ask the extension for the initial diff once the script is running
+    vscode.postMessage({ command: 'ready' });
   </script>
 </body>
 </html>`;
   }
 
   /**
-   * Load diff from git service
+   * Load diffs from the git service for the current mode and push them to
+   * the webview. Honors the gitNova.ignoreWhitespace setting.
    */
-  private async loadDiff(filePath?: string, ref?: string): Promise<void> {
-    try {
-      const diff = filePath
-        ? await this.gitService.getFileDiff(filePath, ref)
-        : await this.gitService.getUnstagedDiffs();
+  private async loadDiff(): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
 
-      const diffData = Array.isArray(diff) ? diff[0] : diff;
-      this.panel?.webview.postMessage({ command: 'showDiff', diff: diffData });
+    try {
+      const ignoreWhitespace = vscode.workspace
+        .getConfiguration('gitNova')
+        .get<boolean>('ignoreWhitespace', false);
+
+      let diffs: FileDiff[];
+      if (this.filePath) {
+        diffs = [await this.gitService.getFileDiff(this.filePath, undefined, { ignoreWhitespace })];
+      } else if (this.mode === 'staged') {
+        diffs = await this.gitService.getStagedDiffs({ ignoreWhitespace });
+      } else {
+        diffs = await this.gitService.getUnstagedDiffs({ ignoreWhitespace });
+      }
+
+      diffs = diffs.filter(d => d.hunks.length > 0);
+      if (diffs.length === 0) {
+        this.panel.webview.postMessage({ command: 'showEmpty' });
+        return;
+      }
+
+      this.panel.webview.postMessage({ command: 'showDiff', diffs });
     } catch (error) {
       logger.error('Failed to load diff', error);
       this.panel?.webview.postMessage({ command: 'showError', error: String(error) });
@@ -458,24 +489,33 @@ export class DiffViewManager {
       logger.debug('Received message from webview:', message);
 
       switch (message.command) {
+        case 'ready':
+          await this.loadDiff();
+          break;
         case 'viewStaged':
-          await this.loadDiff(undefined, '--staged');
+          this.mode = 'staged';
+          this.filePath = undefined;
+          await this.loadDiff();
           break;
         case 'viewUnstaged':
-          await this.loadDiff(undefined, undefined);
+          this.mode = 'unstaged';
+          this.filePath = undefined;
+          await this.loadDiff();
           break;
         case 'refresh':
-          await this.loadDiff(undefined, undefined);
+          await this.loadDiff();
           break;
       }
     });
-    this.disposables.push(messageDisposable);
+    this.panelDisposables.push(messageDisposable);
 
-    // Handle panel disposal
+    // Handle panel disposal (keep the manager alive so it can reopen)
     const onDidDisposeDisposable = this.panel.onDidDispose(() => {
-      this.dispose();
+      this.panel = undefined;
+      this.panelDisposables.forEach(d => d.dispose());
+      this.panelDisposables = [];
     });
-    this.disposables.push(onDidDisposeDisposable);
+    this.panelDisposables.push(onDidDisposeDisposable);
   }
 
   /**
@@ -486,7 +526,7 @@ export class DiffViewManager {
     const diffChangedDisposable = this.eventBus.on(EventType.DiffChanged, () => {
       // Refresh webview if open
       if (this.panel) {
-        this.loadDiff(undefined, undefined);
+        this.loadDiff();
       }
     });
     this.disposables.push(diffChangedDisposable);
@@ -505,6 +545,8 @@ export class DiffViewManager {
     }
 
     // Dispose all disposables
+    this.panelDisposables.forEach(d => d.dispose());
+    this.panelDisposables = [];
     this.disposables.forEach(d => d.dispose());
     this.disposables = [];
   }

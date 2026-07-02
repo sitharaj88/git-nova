@@ -2,6 +2,18 @@
 
 All notable changes to the "GitNova" extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **History rewriting commands**: `Cherry-pick Commit`, `Revert Commit`, `Amend Last Commit`, `Reset to Commit (Soft/Mixed/Hard)`, `Squash Commits`, and `Create Fixup Commit` — from the palette or the Commit History context menu.
+- **Visual Interactive Rebase**: `GitNova: Interactive Rebase (Visual)` — a drag-and-drop todo editor with per-commit pick/reword/squash/fixup/drop actions and inline message editing.
+- **Operation recovery UX**: continue/skip/abort commands for rebase and merge, plus a warning status bar item while a rebase, merge, or cherry-pick is in progress that opens a Continue/Skip/Abort quick pick (`GitNova: Show In-Progress Operation Actions`).
+- **Built-in merge editor integration**: "Resolve in Merge Editor" opens conflicted files in VS Code's native 3-way merge editor.
+- **Native diff editors**: staged/unstaged changes, single commits, and commit/branch comparisons now open in VS Code's built-in diff editor, backed by a revision content provider.
+- **Create Pull Request**: guided in-editor PR creation (push check, base branch pick, title, draft toggle) with an optional **AI-generated description** from the branch diff.
+- **Autolinks**: `gitNova.autolinks` rules turn issue references (e.g. `#123`) in commit messages into clickable links; `{owner}`/`{repo}` placeholders resolve from the GitHub remote.
+- **Status bar blame**: blame for the current line in the status bar (`gitNova.blame.statusBar`), and a configurable inline annotation template (`gitNova.blame.format`).
+
 ## [1.1.0] - 2026-06-20
 
 ### Added

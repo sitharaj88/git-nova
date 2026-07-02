@@ -20,12 +20,9 @@ export function registerCommitCommands(
   eventBus: EventBus
 ): void {
   // Create commit
-  const createCommand = vscode.commands.registerCommand(
-    CommitCommands.Create,
-    async () => {
-      await handleCreateCommit(gitService, repositoryManager, eventBus);
-    }
-  );
+  const createCommand = vscode.commands.registerCommand(CommitCommands.Create, async () => {
+    await handleCreateCommit(gitService, repositoryManager, eventBus);
+  });
   context.subscriptions.push(createCommand);
 
   // View commit history
@@ -127,7 +124,7 @@ export function registerCommitCommands(
 async function handleShowCommit(
   hash: string | undefined,
   gitService: GitService,
-  repositoryManager: RepositoryManager
+  _repositoryManager: RepositoryManager
 ): Promise<void> {
   try {
     const commitHash = hash || (await promptForCommitHash('Enter commit hash to view details'));
@@ -157,7 +154,7 @@ async function handleShowCommit(
  */
 async function handleShowLog(
   gitService: GitService,
-  repositoryManager: RepositoryManager
+  _repositoryManager: RepositoryManager
 ): Promise<void> {
   try {
     const maxCount = await vscode.window.showInputBox({
@@ -559,7 +556,7 @@ async function handleEditMessage(
  */
 async function handleSearch(
   gitService: GitService,
-  repositoryManager: RepositoryManager
+  _repositoryManager: RepositoryManager
 ): Promise<void> {
   try {
     const query = await vscode.window.showInputBox({
@@ -593,7 +590,7 @@ async function handleSearch(
  */
 async function handleFilter(
   gitService: GitService,
-  repositoryManager: RepositoryManager
+  _repositoryManager: RepositoryManager
 ): Promise<void> {
   try {
     const filterType = await vscode.window.showQuickPick(
@@ -830,7 +827,7 @@ async function handleCreateCommit(
  */
 async function handleViewHistory(
   gitService: GitService,
-  repositoryManager: RepositoryManager
+  _repositoryManager: RepositoryManager
 ): Promise<void> {
   try {
     const maxCount = await vscode.window.showInputBox({

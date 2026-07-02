@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { GitService } from './gitService';
+import { GitService, GitOperationState } from './gitService';
 import { EventBus, EventType } from './eventBus';
 import { IGitRepository, GitStatus, Branch } from '../models';
 import { Remote } from '../models/remote';
@@ -37,6 +37,7 @@ interface RepositoryState {
 export class RepositoryManager {
   private cache: Map<string, CacheEntry>;
   private repositoryState: RepositoryState | null = null;
+  private operationState: GitOperationState = { type: null };
   private eventBus: EventBus | null = null;
   private refreshTimers: Map<string, any> = new Map();
   private readonly DEFAULT_TTL = 60000; // 1 minute
@@ -79,6 +80,11 @@ export class RepositoryManager {
         isMerging: false,
         lastUpdated: Date.now(),
       };
+
+      // Detect any operation already in progress (e.g. opened mid-rebase)
+      this.operationState = this.gitService.getOperationState();
+      this.repositoryState.isRebasing = this.operationState.type === 'rebase';
+      this.repositoryState.isMerging = this.operationState.type === 'merge';
 
       // Clear cache when switching repositories
       this.cache.clear();
@@ -338,6 +344,11 @@ export class RepositoryManager {
       this.repositoryState.isDirty = status.files.length > 0;
       this.repositoryState.lastUpdated = Date.now();
 
+      // Cheap .git state check — piggybacks on the existing refresh cycle
+      this.operationState = this.gitService.getOperationState();
+      this.repositoryState.isRebasing = this.operationState.type === 'rebase';
+      this.repositoryState.isMerging = this.operationState.type === 'merge';
+
       // Cache the status
       this.setCache('status', status);
       this.setCache('currentBranch', currentBranch);
@@ -438,6 +449,14 @@ export class RepositoryManager {
   }
 
   /**
+   * Get the in-progress operation state (rebase/merge/cherry-pick)
+   * @returns Last detected operation state
+   */
+  getOperationState(): GitOperationState {
+    return this.operationState;
+  }
+
+  /**
    * Get current branch
    * @returns Current branch or null
    */
@@ -462,5 +481,6 @@ export class RepositoryManager {
 
     // Clear repository state
     this.repositoryState = null;
+    this.operationState = { type: null };
   }
 }

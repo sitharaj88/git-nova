@@ -1,6 +1,6 @@
 /**
  * SubmoduleManager - Enterprise Git Submodule Management
- * 
+ *
  * Provides comprehensive support for Git submodule operations including
  * initialization, updates, status tracking, and lifecycle management.
  */
@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import { logger } from '../utils/logger';
 
 /**
@@ -32,7 +33,7 @@ export enum SubmoduleStatus {
   Uninitialized = 'uninitialized',
   OutOfSync = 'out-of-sync',
   Conflict = 'conflict',
-  Missing = 'missing'
+  Missing = 'missing',
 }
 
 /**
@@ -84,10 +85,7 @@ class SubmoduleManagerClass {
 
   private initialize(): void {
     // Create status bar item for submodule status
-    this._statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      95
-    );
+    this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 95);
     this._statusBarItem.name = 'GitNova Submodules';
     this._disposables.push(this._statusBarItem);
 
@@ -126,7 +124,7 @@ class SubmoduleManagerClass {
       // Parse .gitmodules file
       const gitmodulesPath = path.join(repoPath, '.gitmodules');
       const gitmodulesContent = fs.readFileSync(gitmodulesPath, 'utf-8');
-      
+
       const submoduleConfigs = this.parseGitmodules(gitmodulesContent);
 
       // Get status for each submodule
@@ -142,7 +140,7 @@ class SubmoduleManagerClass {
           branch: config.branch,
           commit,
           status,
-          initialized: fs.existsSync(path.join(submodulePath, '.git'))
+          initialized: fs.existsSync(path.join(submodulePath, '.git')),
         });
       }
 
@@ -187,7 +185,7 @@ class SubmoduleManagerClass {
             name: current.name,
             path: current.path,
             url: current.url,
-            branch: current.branch
+            branch: current.branch,
           });
         }
         current = { name: submoduleMatch[1] };
@@ -220,7 +218,7 @@ class SubmoduleManagerClass {
         name: current.name,
         path: current.path,
         url: current.url,
-        branch: current.branch
+        branch: current.branch,
       });
     }
 
@@ -230,10 +228,13 @@ class SubmoduleManagerClass {
   /**
    * Get submodule status
    */
-  private async getSubmoduleStatus(repoPath: string, submodulePath: string): Promise<SubmoduleStatus> {
+  private async getSubmoduleStatus(
+    repoPath: string,
+    submodulePath: string
+  ): Promise<SubmoduleStatus> {
     try {
       const fullPath = path.join(repoPath, submodulePath);
-      
+
       if (!fs.existsSync(fullPath)) {
         return SubmoduleStatus.Missing;
       }
@@ -243,11 +244,10 @@ class SubmoduleManagerClass {
       }
 
       // Check if there are local changes
-      const { execSync } = require('child_process');
       try {
         const result = execSync('git status --porcelain', {
           cwd: fullPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
 
         if (result.trim()) {
@@ -267,18 +267,19 @@ class SubmoduleManagerClass {
   /**
    * Get current commit of a submodule
    */
-  private async getSubmoduleCommit(repoPath: string, submodulePath: string): Promise<string | undefined> {
+  private async getSubmoduleCommit(
+    repoPath: string,
+    submodulePath: string
+  ): Promise<string | undefined> {
     try {
       const fullPath = path.join(repoPath, submodulePath);
-      
+
       if (!fs.existsSync(path.join(fullPath, '.git'))) {
         return undefined;
       }
-
-      const { execSync } = require('child_process');
       const result = execSync('git rev-parse HEAD', {
         cwd: fullPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
       return result.trim().substring(0, 8);
@@ -291,7 +292,7 @@ class SubmoduleManagerClass {
    * Initialize submodules
    */
   public async initSubmodules(
-    repoPath: string, 
+    repoPath: string,
     options?: { recursive?: boolean; submodulePaths?: string[] }
   ): Promise<void> {
     try {
@@ -299,13 +300,11 @@ class SubmoduleManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Initializing submodules...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           let command = 'git submodule init';
-          
+
           if (options?.submodulePaths && options.submodulePaths.length > 0) {
             command += ` -- ${options.submodulePaths.join(' ')}`;
           }
@@ -314,7 +313,7 @@ class SubmoduleManagerClass {
 
           if (options?.recursive) {
             execSync('git submodule foreach --recursive git submodule init', {
-              cwd: repoPath
+              cwd: repoPath,
             });
           }
 
@@ -333,20 +332,15 @@ class SubmoduleManagerClass {
   /**
    * Update submodules
    */
-  public async updateSubmodules(
-    repoPath: string,
-    options?: SubmoduleUpdateOptions
-  ): Promise<void> {
+  public async updateSubmodules(repoPath: string, options?: SubmoduleUpdateOptions): Promise<void> {
     try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Updating submodules...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           let command = 'git submodule update';
 
           if (options?.init) {
@@ -388,20 +382,15 @@ class SubmoduleManagerClass {
   /**
    * Add a new submodule
    */
-  public async addSubmodule(
-    repoPath: string,
-    options: SubmoduleAddOptions
-  ): Promise<void> {
+  public async addSubmodule(repoPath: string, options: SubmoduleAddOptions): Promise<void> {
     try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: `Adding submodule: ${options.path}...`,
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           let command = `git submodule add`;
 
           if (options.branch) {
@@ -449,20 +438,18 @@ class SubmoduleManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Removing submodule: ${submodulePath}...`,
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           // Deinitialize the submodule
           execSync(`git submodule deinit -f ${submodulePath}`, { cwd: repoPath });
-          
+
           // Remove from .git/modules
           const modulePath = path.join(repoPath, '.git', 'modules', submodulePath);
           if (fs.existsSync(modulePath)) {
             fs.rmSync(modulePath, { recursive: true, force: true });
           }
-          
+
           // Remove the submodule entry
           execSync(`git rm -f ${submodulePath}`, { cwd: repoPath });
 
@@ -481,22 +468,17 @@ class SubmoduleManagerClass {
   /**
    * Sync submodule URLs
    */
-  public async syncSubmodules(
-    repoPath: string,
-    options?: SubmoduleSyncOptions
-  ): Promise<void> {
+  public async syncSubmodules(repoPath: string, options?: SubmoduleSyncOptions): Promise<void> {
     try {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Syncing submodules...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           let command = 'git submodule sync';
-          
+
           if (options?.recursive) {
             command += ' --recursive';
           }
@@ -520,7 +502,7 @@ class SubmoduleManagerClass {
    */
   public async showSubmoduleQuickPick(repoPath: string): Promise<Submodule | undefined> {
     const submodules = await this.listSubmodules(repoPath);
-    
+
     if (submodules.length === 0) {
       vscode.window.showInformationMessage('No submodules found in this repository');
       return undefined;
@@ -530,13 +512,13 @@ class SubmoduleManagerClass {
       label: sm.name,
       description: sm.path,
       detail: `${this.getStatusIcon(sm.status)} ${sm.status} | ${sm.commit || 'Not initialized'} | ${sm.url}`,
-      submodule: sm
+      submodule: sm,
     }));
 
     const selected = await vscode.window.showQuickPick(items, {
       placeHolder: 'Select a submodule',
       matchOnDescription: true,
-      matchOnDetail: true
+      matchOnDetail: true,
     });
 
     return selected?.submodule;
@@ -579,7 +561,7 @@ class SubmoduleManagerClass {
           return 'Please enter a valid Git repository URL';
         }
         return undefined;
-      }
+      },
     });
 
     if (!url) {
@@ -587,7 +569,7 @@ class SubmoduleManagerClass {
     }
 
     const suggestedPath = url.split('/').pop()?.replace('.git', '') || 'submodule';
-    
+
     const submodulePath = await vscode.window.showInputBox({
       prompt: 'Enter the path for the submodule',
       value: suggestedPath,
@@ -599,7 +581,7 @@ class SubmoduleManagerClass {
           return 'Path cannot contain ".."';
         }
         return undefined;
-      }
+      },
     });
 
     if (!submodulePath) {
@@ -608,13 +590,13 @@ class SubmoduleManagerClass {
 
     const branch = await vscode.window.showInputBox({
       prompt: 'Enter branch to track (optional)',
-      placeHolder: 'main'
+      placeHolder: 'main',
     });
 
     await this.addSubmodule(repoPath, {
       url,
       path: submodulePath,
-      branch: branch || undefined
+      branch: branch || undefined,
     });
   }
 
@@ -627,15 +609,13 @@ class SubmoduleManagerClass {
     }
 
     const submodules = await this.listSubmodules(repoPath);
-    
+
     if (submodules.length === 0) {
       this._statusBarItem.hide();
       return;
     }
 
-    const modifiedCount = submodules.filter(
-      sm => sm.status !== SubmoduleStatus.Clean
-    ).length;
+    const modifiedCount = submodules.filter(sm => sm.status !== SubmoduleStatus.Clean).length;
 
     if (modifiedCount > 0) {
       this._statusBarItem.text = `$(package) ${modifiedCount} submodule(s) need attention`;
@@ -666,7 +646,7 @@ class SubmoduleManagerClass {
     if (this._cacheTimeout) {
       clearTimeout(this._cacheTimeout);
     }
-    
+
     this._cacheTimeout = setTimeout(() => {
       this._submoduleCache.delete(repoPath);
     }, this.CACHE_TTL);

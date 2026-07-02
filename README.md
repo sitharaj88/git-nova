@@ -26,13 +26,15 @@ A comprehensive, enterprise-grade Git plugin for Visual Studio Code that provide
 
 - **Branch Management**: Create, delete, rename, switch, and compare branches with ease
 - **Commit History**: View and search commit history with detailed information
-- **Diff Viewer**: Side-by-side and unified diff views with syntax highlighting
+- **History Rewriting**: Cherry-pick, revert, amend, reset (soft/mixed/hard), squash, and fixup commits from the palette or the history context menu
+- **Native Diff Editors**: Staged/unstaged changes, single commits, and commit/branch comparisons open in VS Code's built-in diff editor
 - **Stash Management**: Create, apply, pop, and drop stashes
-- **Interactive Rebase**: Drag-and-drop commit reordering with conflict resolution
-- **Merge Conflict Resolution**: Side-by-side conflict view with merge strategies
+- **Visual Interactive Rebase**: Drag-and-drop commit reordering with per-commit pick/reword/squash/fixup/drop actions and inline message editing
+- **Merge Conflict Resolution**: Open conflicts in VS Code's built-in merge editor, or accept ours/theirs per file
+- **Operation Recovery**: Continue, skip, or abort in-progress rebases, merges, and cherry-picks — a warning status bar item surfaces these actions while an operation is running
 - **Remote Operations**: Fetch, pull, push, and manage remotes
 - **Tag Management**: Create, delete, and push tags
-- **Status Bar Integration**: Quick access to branch, status, and sync information
+- **Status Bar Integration**: Quick access to branch, status, and sync information, plus blame for the current line
 - **Tree Views**: Native VSCode tree views for branches, commits, stashes, remotes, and tags
 
 ### 🤖 AI Assistance
@@ -61,6 +63,8 @@ Collaborate without leaving the editor:
 - Dedicated **Pull Requests & Issues** view listing open PRs and issues for your GitHub remote
 - Built-in VS Code GitHub sign-in — no personal access token to manage or store
 - View PR details in-editor, **one-click checkout** of a PR branch, and open PRs/issues in the browser
+- **Create pull requests** — a guided flow (push check, base branch pick, title, draft toggle) with an optional **AI-generated description** from the branch diff
+- **Autolinks** — configurable rules (`gitNova.autolinks`) turn issue references like `#123` in commit messages into clickable links, with `{owner}`/`{repo}` resolved from your GitHub remote
 - **Launchpad** — a unified hub of your actionable items: PRs awaiting your review, your PRs, and issues assigned to you
 
 ### 📊 Visualization
@@ -107,7 +111,8 @@ Inline blame annotations for code authorship:
 - Line-by-line blame information
 - Hover details with commit info
 - Recent commit highlighting
-- Configurable date formats (relative, short, full)
+- Status bar blame for the current line
+- Configurable annotation template (`gitNova.blame.format`) and date formats (relative, short, full)
 - Toggle inline blame on/off
 
 ### 🌳 Worktree Management
@@ -234,9 +239,29 @@ npm run watch
 | Command | Description |
 |---------|-------------|
 | `GitNova: Create Commit` | Create a new commit |
+| `GitNova: Amend Last Commit` | Amend the last commit, with or without a new message |
+| `GitNova: Cherry-pick Commit` | Apply a commit onto the current branch |
+| `GitNova: Revert Commit` | Create a commit that undoes another |
+| `GitNova: Reset to Commit (Soft/Mixed/Hard)` | Reset the branch to a commit |
+| `GitNova: Squash Commits` | Squash the last N commits into one |
+| `GitNova: Create Fixup Commit` | Create a fixup commit for an earlier commit |
 | `GitNova: View Commit History` | View commit history |
 | `GitNova: Insert Commit Template` | Use a commit template |
 | `GitNova: Commit Template Wizard` | Interactive template wizard |
+
+### Rebase & Merge Commands
+| Command | Description |
+|---------|-------------|
+| `GitNova: Interactive Rebase (Visual)` | Drag-and-drop rebase editor with per-commit actions |
+| `GitNova: Interactive Rebase` | Quick-pick based interactive rebase |
+| `GitNova: Continue Rebase` / `Abort Rebase` / `Skip Rebase Commit` | Drive an in-progress rebase |
+| `GitNova: Continue Merge` / `Abort Merge` | Drive an in-progress merge |
+| `GitNova: Show In-Progress Operation Actions` | Continue/Skip/Abort quick pick for the running rebase, merge, or cherry-pick |
+
+### GitHub Commands
+| Command | Description |
+|---------|-------------|
+| `GitNova: Create Pull Request` | Guided PR creation with optional AI-generated description |
 
 ### Stash Commands
 | Command | Description |
@@ -291,7 +316,6 @@ The extension can be configured through VSCode settings:
 
 ```json
 {
-  "gitNova.diffViewMode": "unified",
   "gitNova.ignoreWhitespace": false,
   "gitNova.showLineNumbers": true
 }
@@ -301,24 +325,33 @@ The extension can be configured through VSCode settings:
 
 ```json
 {
-  "gitNova.branchProtection.enabled": true,
-  "gitNova.branchProtection.protectedPatterns": [
-    "main", "master", "develop", "release/*", "hotfix/*"
-  ],
-  "gitNova.branchProtection.requirePullRequest": true
+  "gitNova.branchProtection.rules": [
+    {
+      "pattern": "main",
+      "isRegex": false,
+      "preventDelete": true,
+      "preventForcePush": true,
+      "requirePullRequest": true,
+      "requireLinearHistory": false,
+      "requireSignedCommits": false
+    }
+  ]
 }
 ```
+
+Leave `rules` empty to use the built-in defaults (main, master, develop, release/*, hotfix/*).
 
 ### Branch Naming Conventions
 
 ```json
 {
   "gitNova.branchNaming.enabled": true,
-  "gitNova.branchNaming.pattern": "^(feature|bugfix|hotfix|release|chore)/[a-z0-9-]+$",
   "gitNova.branchNaming.prefixes": [
     "feature/", "bugfix/", "hotfix/", "release/", "chore/"
   ],
-  "gitNova.branchNaming.requireTicketNumber": false
+  "gitNova.branchNaming.requireTicketNumber": false,
+  "gitNova.branchNaming.ticketPattern": "[A-Z]+-\\d+",
+  "gitNova.branchNaming.maxLength": 100
 }
 ```
 
@@ -327,7 +360,9 @@ The extension can be configured through VSCode settings:
 ```json
 {
   "gitNova.commitMessage.maxSubjectLength": 72,
+  "gitNova.commitMessage.maxBodyLineLength": 100,
   "gitNova.commitMessage.requireType": false,
+  "gitNova.commitMessage.requireScope": false,
   "gitNova.commitMessage.allowedTypes": [
     "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"
   ]
@@ -339,30 +374,25 @@ The extension can be configured through VSCode settings:
 ```json
 {
   "gitNova.blame.enabled": true,
+  "gitNova.blame.format": "{{author}}, {{date}} • {{summary}}",
   "gitNova.blame.dateFormat": "relative",
   "gitNova.blame.highlightRecent": true,
-  "gitNova.blame.recentDays": 7
+  "gitNova.blame.recentDays": 7,
+  "gitNova.blame.statusBar": true
 }
 ```
 
-### Performance Settings
+### Autolinks
 
 ```json
 {
-  "gitNova.performance.enableMetrics": true,
-  "gitNova.performance.slowOperationThreshold": 3000,
-  "gitNova.performance.showCacheStats": false
+  "gitNova.autolinks": [
+    { "pattern": "#(\\d+)", "url": "https://github.com/{owner}/{repo}/issues/$1" }
+  ]
 }
 ```
 
-### Logging Settings
-
-```json
-{
-  "gitNova.logging.level": "info",
-  "gitNova.logging.includeTimestamp": true
-}
-```
+Patterns are regular expressions matched against commit message text; `$1`–`$9` insert capture groups and `{owner}`/`{repo}` resolve from the detected GitHub remote.
 
 ## Project Structure
 

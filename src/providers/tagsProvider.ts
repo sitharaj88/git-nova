@@ -43,30 +43,33 @@ class TagTreeItem extends vscode.TreeItem {
 class TagItem extends TagTreeItem {
   constructor(public readonly tag: Tag) {
     super(tag.name, TreeItemType.Tag);
-    
-    this.iconPath = tag.isAnnotated 
-      ? new vscode.ThemeIcon('bookmark', new vscode.ThemeColor('gitDecoration.addedResourceForeground'))
+
+    this.iconPath = tag.isAnnotated
+      ? new vscode.ThemeIcon(
+          'bookmark',
+          new vscode.ThemeColor('gitDecoration.addedResourceForeground')
+        )
       : new vscode.ThemeIcon('tag');
-    
+
     this.description = tag.hash.substring(0, 7);
     this.tooltip = this.createTooltip();
   }
 
   private createTooltip(): string {
     const lines = [`Tag: ${this.tag.name}`, `Commit: ${this.tag.hash}`];
-    
+
     if (this.tag.isAnnotated && this.tag.message) {
       lines.push('', `Message: ${this.tag.message}`);
     }
-    
+
     if (this.tag.taggerName) {
       lines.push(`Tagger: ${this.tag.taggerName}`);
     }
-    
+
     if (this.tag.taggerDate) {
       lines.push(`Date: ${this.tag.taggerDate.toLocaleString()}`);
     }
-    
+
     return lines.join('\n');
   }
 }
@@ -106,11 +109,11 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
 
     if (!element) {
       await this.loadTags();
-      
+
       if (this.tags.length === 0) {
         return [];
       }
-      
+
       // Return tags directly
       return this.tags.map(tag => new TagItem(tag));
     }
@@ -127,7 +130,7 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
 
     try {
       const tagList = await this.gitService.getTags();
-      
+
       this.tags = tagList.map(tagData => ({
         name: tagData.name,
         hash: tagData.hash || '',
@@ -156,7 +159,6 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
         // Fall back to string comparison
         return b.name.localeCompare(a.name);
       });
-
     } catch (error) {
       logger.error('TagsProvider: Error loading tags', error);
       this.tags = [];
@@ -164,13 +166,9 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
   }
 
   private setupEventListeners(): void {
-    this.disposables.push(
-      this.eventBus.on(EventType.RepositoryChanged, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.RepositoryChanged, () => this.refresh()));
 
-    this.disposables.push(
-      this.eventBus.on(EventType.BranchSwitched, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.BranchSwitched, () => this.refresh()));
   }
 
   dispose(): void {
@@ -235,14 +233,14 @@ function registerTagCommands(
             return 'Tag name cannot contain spaces';
           }
           return null;
-        }
+        },
       });
 
       if (!tagName) return;
 
       const message = await vscode.window.showInputBox({
         prompt: 'Enter tag message (optional, leave empty for lightweight tag)',
-        placeHolder: 'Release version 1.0.0'
+        placeHolder: 'Release version 1.0.0',
       });
 
       try {

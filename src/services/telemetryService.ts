@@ -8,30 +8,30 @@ export enum TelemetryEventType {
   // Command events
   CommandExecuted = 'command.executed',
   CommandFailed = 'command.failed',
-  
+
   // Git operation events
   GitOperationStarted = 'git.operation.started',
   GitOperationCompleted = 'git.operation.completed',
   GitOperationFailed = 'git.operation.failed',
-  
+
   // UI events
   ViewOpened = 'view.opened',
   ViewClosed = 'view.closed',
   TreeItemExpanded = 'tree.item.expanded',
-  
+
   // Performance events
   PerformanceMetric = 'performance.metric',
   SlowOperation = 'performance.slow.operation',
-  
+
   // Error events
   Error = 'error',
   UnhandledException = 'error.unhandled',
-  
+
   // User flow events
   SessionStarted = 'session.started',
   SessionEnded = 'session.ended',
   FeatureUsed = 'feature.used',
-  
+
   // Repository events
   RepositoryOpened = 'repository.opened',
   RepositoryChanged = 'repository.changed',
@@ -83,7 +83,10 @@ export class TelemetryService {
   private commandUsageCount: Map<string, number> = new Map();
   private featureUsageCount: Map<string, number> = new Map();
   private errorCount: number = 0;
-  private operationMetrics: Map<string, { count: number; totalDuration: number; failures: number }> = new Map();
+  private operationMetrics: Map<
+    string,
+    { count: number; totalDuration: number; failures: number }
+  > = new Map();
 
   private constructor() {
     this.config = { ...DEFAULT_TELEMETRY_CONFIG };
@@ -106,11 +109,13 @@ export class TelemetryService {
    */
   initialize(context: vscode.ExtensionContext): void {
     // Listen for telemetry setting changes
-    const telemetryListener = vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-      if (e.affectsConfiguration('telemetry')) {
-        this.checkVsCodeTelemetrySetting();
+    const telemetryListener = vscode.workspace.onDidChangeConfiguration(
+      (e: vscode.ConfigurationChangeEvent) => {
+        if (e.affectsConfiguration('telemetry')) {
+          this.checkVsCodeTelemetrySetting();
+        }
       }
-    });
+    );
     this.disposables.push(telemetryListener);
 
     // Listen for log entries to track errors
@@ -136,8 +141,10 @@ export class TelemetryService {
    * Check VS Code telemetry setting
    */
   private checkVsCodeTelemetrySetting(): void {
-    const telemetryLevel = vscode.workspace.getConfiguration('telemetry').get<string>('telemetryLevel');
-    
+    const telemetryLevel = vscode.workspace
+      .getConfiguration('telemetry')
+      .get<string>('telemetryLevel');
+
     switch (telemetryLevel) {
       case 'off':
         this.config.enabled = false;
@@ -194,13 +201,21 @@ export class TelemetryService {
     }
 
     // Filter based on configuration
-    if (!this.config.collectUsageData && 
-        [TelemetryEventType.CommandExecuted, TelemetryEventType.FeatureUsed, TelemetryEventType.ViewOpened].includes(type)) {
+    if (
+      !this.config.collectUsageData &&
+      [
+        TelemetryEventType.CommandExecuted,
+        TelemetryEventType.FeatureUsed,
+        TelemetryEventType.ViewOpened,
+      ].includes(type)
+    ) {
       return;
     }
 
-    if (!this.config.collectPerformanceData && 
-        [TelemetryEventType.PerformanceMetric, TelemetryEventType.SlowOperation].includes(type)) {
+    if (
+      !this.config.collectPerformanceData &&
+      [TelemetryEventType.PerformanceMetric, TelemetryEventType.SlowOperation].includes(type)
+    ) {
       return;
     }
 
@@ -259,7 +274,11 @@ export class TelemetryService {
     metadata?: Record<string, string | number | boolean | undefined>
   ): void {
     // Update operation metrics
-    const metrics = this.operationMetrics.get(operation) || { count: 0, totalDuration: 0, failures: 0 };
+    const metrics = this.operationMetrics.get(operation) || {
+      count: 0,
+      totalDuration: 0,
+      failures: 0,
+    };
     metrics.count++;
     metrics.totalDuration += durationMs;
     if (!success) {
@@ -281,7 +300,10 @@ export class TelemetryService {
   /**
    * Track a feature usage
    */
-  trackFeature(featureName: string, properties?: Record<string, string | number | boolean | undefined>): void {
+  trackFeature(
+    featureName: string,
+    properties?: Record<string, string | number | boolean | undefined>
+  ): void {
     const count = this.featureUsageCount.get(featureName) || 0;
     this.featureUsageCount.set(featureName, count + 1);
 
@@ -295,7 +317,12 @@ export class TelemetryService {
   /**
    * Track an error
    */
-  trackError(operation: string, message: string, error?: Error, metadata?: Record<string, string | number | boolean | undefined>): void {
+  trackError(
+    operation: string,
+    message: string,
+    error?: Error,
+    metadata?: Record<string, string | number | boolean | undefined>
+  ): void {
     if (!this.config.collectErrorReports) {
       return;
     }
@@ -314,28 +341,45 @@ export class TelemetryService {
   /**
    * Track a performance metric
    */
-  trackPerformance(operation: string, durationMs: number, success: boolean, metadata?: Record<string, string | number | boolean | undefined>): void {
+  trackPerformance(
+    operation: string,
+    durationMs: number,
+    success: boolean,
+    metadata?: Record<string, string | number | boolean | undefined>
+  ): void {
     if (!this.config.collectPerformanceData) {
       return;
     }
 
-    this.trackEvent(TelemetryEventType.PerformanceMetric, {
-      operation,
-      success,
-      ...metadata,
-    }, { durationMs });
+    this.trackEvent(
+      TelemetryEventType.PerformanceMetric,
+      {
+        operation,
+        success,
+        ...metadata,
+      },
+      { durationMs }
+    );
   }
 
   /**
    * Create a performance tracker for an operation
    */
-  startOperation(operation: string): { complete: (success?: boolean, metadata?: Record<string, string | number | boolean | undefined>) => void } {
+  startOperation(operation: string): {
+    complete: (
+      success?: boolean,
+      metadata?: Record<string, string | number | boolean | undefined>
+    ) => void;
+  } {
     const start = performance.now();
-    
+
     this.trackEvent(TelemetryEventType.GitOperationStarted, { operation });
 
     return {
-      complete: (success = true, metadata?: Record<string, string | number | boolean | undefined>) => {
+      complete: (
+        success = true,
+        metadata?: Record<string, string | number | boolean | undefined>
+      ) => {
         const durationMs = performance.now() - start;
         this.trackGitOperation(operation, success, durationMs, metadata);
       },
@@ -361,7 +405,7 @@ export class TelemetryService {
    */
   getOperationMetrics(): Map<string, { count: number; avgDuration: number; failureRate: number }> {
     const result = new Map<string, { count: number; avgDuration: number; failureRate: number }>();
-    
+
     for (const [operation, metrics] of this.operationMetrics) {
       result.set(operation, {
         count: metrics.count,
@@ -369,7 +413,7 @@ export class TelemetryService {
         failureRate: metrics.count > 0 ? metrics.failures / metrics.count : 0,
       });
     }
-    
+
     return result;
   }
 
@@ -414,11 +458,15 @@ export class TelemetryService {
    * Export telemetry data as JSON
    */
   exportData(): string {
-    return JSON.stringify({
-      config: this.config,
-      report: this.generateReport(),
-      events: this.events,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        config: this.config,
+        report: this.generateReport(),
+        events: this.events,
+      },
+      null,
+      2
+    );
   }
 
   /**
@@ -447,7 +495,7 @@ export class TelemetryService {
       disposable.dispose();
     }
     this.disposables = [];
-    
+
     logger.info('TelemetryService disposed');
   }
 }

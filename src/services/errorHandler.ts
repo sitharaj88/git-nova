@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { logger } from '../utils/logger';
-import { telemetryService, TelemetryEventType } from './telemetryService';
+import { telemetryService } from './telemetryService';
 
 /**
  * Error severity levels
@@ -121,9 +121,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     category: ErrorCategory.Git,
     severity: ErrorSeverity.Low,
     userMessage: 'A branch with this name already exists.',
-    recoveryStrategies: [
-      { action: UserAction.Cancel, label: 'OK' },
-    ],
+    recoveryStrategies: [{ action: UserAction.Cancel, label: 'OK' }],
   },
   {
     pattern: /branch.*not found/i,
@@ -135,7 +133,8 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     pattern: /cannot delete.*checked out/i,
     category: ErrorCategory.Git,
     severity: ErrorSeverity.Medium,
-    userMessage: 'Cannot delete the currently checked out branch. Switch to a different branch first.',
+    userMessage:
+      'Cannot delete the currently checked out branch. Switch to a different branch first.',
   },
   {
     pattern: /cannot rebase.*dirty working tree/i,
@@ -189,7 +188,8 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     pattern: /password authentication was removed/i,
     category: ErrorCategory.Authentication,
     severity: ErrorSeverity.High,
-    userMessage: 'Password authentication is no longer supported. Please use a personal access token.',
+    userMessage:
+      'Password authentication is no longer supported. Please use a personal access token.',
   },
   // File system errors
   {
@@ -259,7 +259,7 @@ export class ErrorHandlerService {
 
     // Create GitNovaError
     const gitNovaError = this.classifyError(error, context);
-    
+
     // Override with provided values
     if (severity) gitNovaError.severity = severity;
     if (category) gitNovaError.category = category;
@@ -290,15 +290,16 @@ export class ErrorHandlerService {
   /**
    * Classify an error based on known patterns
    */
-  private classifyError(error: unknown, context: string): GitNovaError {
+  private classifyError(error: unknown, _context: string): GitNovaError {
     const originalError = error instanceof Error ? error : new Error(String(error));
     const errorMessage = originalError.message || String(error);
 
     // Find matching pattern
     for (const pattern of ERROR_PATTERNS) {
-      const matches = typeof pattern.pattern === 'string'
-        ? errorMessage.toLowerCase().includes(pattern.pattern.toLowerCase())
-        : pattern.pattern.test(errorMessage);
+      const matches =
+        typeof pattern.pattern === 'string'
+          ? errorMessage.toLowerCase().includes(pattern.pattern.toLowerCase())
+          : pattern.pattern.test(errorMessage);
 
       if (matches) {
         return {
@@ -352,10 +353,7 @@ export class ErrorHandlerService {
         );
         break;
       case ErrorSeverity.High:
-        result = await vscode.window.showErrorMessage(
-          `GitNova: ${error.userMessage}`,
-          ...actions
-        );
+        result = await vscode.window.showErrorMessage(`GitNova: ${error.userMessage}`, ...actions);
         break;
       case ErrorSeverity.Medium:
         result = await vscode.window.showWarningMessage(
@@ -430,9 +428,9 @@ export class ErrorHandlerService {
     }
   ): Promise<T> {
     const { maxRetries = this.MAX_RETRY_ATTEMPTS, retryDelayMs = 1000, onRetry } = options || {};
-    
+
     let lastError: Error | undefined;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const result = await operation();
@@ -441,7 +439,7 @@ export class ErrorHandlerService {
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         if (attempt < maxRetries) {
           logger.warn(`Retry ${attempt}/${maxRetries} for ${operationId}: ${lastError.message}`);
           onRetry?.(attempt, lastError);
@@ -486,14 +484,11 @@ export class ErrorHandlerService {
   /**
    * Create a wrapper function for commands
    */
-  wrapCommand<T extends (...args: any[]) => Promise<any>>(
-    commandId: string,
-    handler: T
-  ): T {
+  wrapCommand<T extends (...args: any[]) => Promise<any>>(commandId: string, handler: T): T {
     return (async (...args: Parameters<T>) => {
       const timer = logger.startTimer(`Command: ${commandId}`);
       const tracker = telemetryService.startOperation(commandId);
-      
+
       try {
         const result = await handler(...args);
         tracker.complete(true);
@@ -527,12 +522,12 @@ export class ErrorHandlerService {
    */
   getErrorCountByCategory(): Map<ErrorCategory, number> {
     const counts = new Map<ErrorCategory, number>();
-    
+
     for (const error of this.errorHistory) {
       const count = counts.get(error.category) || 0;
       counts.set(error.category, count + 1);
     }
-    
+
     return counts;
   }
 

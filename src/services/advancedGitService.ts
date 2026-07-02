@@ -1,6 +1,6 @@
 /**
  * AdvancedGitService - Additional Modern Git Features
- * 
+ *
  * Provides advanced git operations including bisect, reflog,
  * sparse checkout, patches, and repository maintenance.
  */
@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import { logger } from '../utils/logger';
 
 /**
@@ -94,7 +95,6 @@ class AdvancedGitServiceClass {
     options?: { maxEntries?: number; branch?: string }
   ): Promise<ReflogEntry[]> {
     try {
-      const { execSync } = require('child_process');
       const maxEntries = options?.maxEntries || 100;
       const ref = options?.branch || 'HEAD';
 
@@ -107,7 +107,7 @@ class AdvancedGitServiceClass {
       const lines = result.split('\n').filter((l: string) => l.trim());
 
       lines.forEach((line: string, index: number) => {
-        const [hash, shortHash, action, refSelector, date, author] = line.split('|');
+        const [hash, shortHash, action, , date, author] = line.split('|');
         if (hash && action) {
           entries.push({
             hash,
@@ -116,7 +116,7 @@ class AdvancedGitServiceClass {
             message: action,
             date: new Date(date),
             author,
-            index
+            index,
           });
         }
       });
@@ -131,16 +131,11 @@ class AdvancedGitServiceClass {
   /**
    * Restore from reflog
    */
-  public async restoreFromReflog(
-    repoPath: string,
-    entry: ReflogEntry | string
-  ): Promise<void> {
+  public async restoreFromReflog(repoPath: string, entry: ReflogEntry | string): Promise<void> {
     try {
       const hash = typeof entry === 'string' ? entry : entry.hash;
-      const { execSync } = require('child_process');
-
       execSync(`git checkout ${hash}`, { cwd: repoPath });
-      
+
       vscode.window.showInformationMessage(`Restored to ${hash.substring(0, 8)}`);
       logger.info(`Restored to reflog entry: ${hash}`);
     } catch (error) {
@@ -164,12 +159,12 @@ class AdvancedGitServiceClass {
       label: `$(git-commit) ${entry.shortHash}`,
       description: entry.action,
       detail: `${entry.author} • ${this.formatRelativeDate(entry.date)}`,
-      entry
+      entry,
     }));
 
     const selected = await vscode.window.showQuickPick(items, {
       placeHolder: 'Select a reflog entry to restore',
-      matchOnDescription: true
+      matchOnDescription: true,
     });
 
     return selected?.entry;
@@ -186,8 +181,6 @@ class AdvancedGitServiceClass {
     goodCommit?: string
   ): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync('git bisect start', { cwd: repoPath });
       logger.info('Bisect started');
 
@@ -211,12 +204,11 @@ class AdvancedGitServiceClass {
    */
   public async bisectGood(repoPath: string, commit?: string): Promise<string> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync(`git bisect good ${commit || ''}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       logger.info('Marked commit as good');
       return result;
     } catch (error) {
@@ -230,12 +222,11 @@ class AdvancedGitServiceClass {
    */
   public async bisectBad(repoPath: string, commit?: string): Promise<string> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync(`git bisect bad ${commit || ''}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       logger.info('Marked commit as bad');
       return result;
     } catch (error) {
@@ -249,12 +240,11 @@ class AdvancedGitServiceClass {
    */
   public async bisectSkip(repoPath: string): Promise<string> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync('git bisect skip', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       logger.info('Skipped commit in bisect');
       return result;
     } catch (error) {
@@ -268,9 +258,8 @@ class AdvancedGitServiceClass {
    */
   public async bisectReset(repoPath: string): Promise<void> {
     try {
-      const { execSync } = require('child_process');
       execSync('git bisect reset', { cwd: repoPath });
-      
+
       vscode.window.showInformationMessage('Bisect session ended');
       logger.info('Bisect reset');
     } catch (error) {
@@ -290,8 +279,6 @@ class AdvancedGitServiceClass {
       if (!active) {
         return { active: false, goodCommits: [], badCommits: [] };
       }
-
-      const { execSync } = require('child_process');
       const log = execSync('git bisect log', { cwd: repoPath, encoding: 'utf-8' });
 
       const goodCommits: string[] = [];
@@ -319,13 +306,12 @@ class AdvancedGitServiceClass {
    */
   public async bisectRun(repoPath: string, script: string): Promise<string> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync(`git bisect run ${script}`, {
         cwd: repoPath,
         encoding: 'utf-8',
-        timeout: 300000 // 5 minute timeout
+        timeout: 300000, // 5 minute timeout
       });
-      
+
       logger.info('Bisect run completed');
       return result;
     } catch (error) {
@@ -339,15 +325,10 @@ class AdvancedGitServiceClass {
   /**
    * Initialize sparse checkout
    */
-  public async initSparseCheckout(
-    repoPath: string,
-    cone: boolean = true
-  ): Promise<void> {
+  public async initSparseCheckout(repoPath: string, cone: boolean = true): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync('git sparse-checkout init' + (cone ? ' --cone' : ''), {
-        cwd: repoPath
+        cwd: repoPath,
       });
 
       vscode.window.showInformationMessage('Sparse checkout initialized');
@@ -361,18 +342,15 @@ class AdvancedGitServiceClass {
   /**
    * Set sparse checkout patterns
    */
-  public async setSparseCheckoutPatterns(
-    repoPath: string,
-    patterns: string[]
-  ): Promise<void> {
+  public async setSparseCheckoutPatterns(repoPath: string, patterns: string[]): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync(`git sparse-checkout set ${patterns.join(' ')}`, {
-        cwd: repoPath
+        cwd: repoPath,
       });
 
-      vscode.window.showInformationMessage(`Sparse checkout updated with ${patterns.length} patterns`);
+      vscode.window.showInformationMessage(
+        `Sparse checkout updated with ${patterns.length} patterns`
+      );
       logger.info('Sparse checkout patterns set');
     } catch (error) {
       logger.error('Failed to set sparse checkout', error);
@@ -383,15 +361,10 @@ class AdvancedGitServiceClass {
   /**
    * Add patterns to sparse checkout
    */
-  public async addSparseCheckoutPatterns(
-    repoPath: string,
-    patterns: string[]
-  ): Promise<void> {
+  public async addSparseCheckoutPatterns(repoPath: string, patterns: string[]): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync(`git sparse-checkout add ${patterns.join(' ')}`, {
-        cwd: repoPath
+        cwd: repoPath,
       });
 
       logger.info('Added sparse checkout patterns');
@@ -406,14 +379,12 @@ class AdvancedGitServiceClass {
    */
   public async getSparseCheckoutConfig(repoPath: string): Promise<SparseCheckoutConfig> {
     try {
-      const { execSync } = require('child_process');
-
       // Check if sparse checkout is enabled
       let enabled = false;
       try {
         const config = execSync('git config core.sparseCheckout', {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
         enabled = config.trim() === 'true';
       } catch {
@@ -425,7 +396,7 @@ class AdvancedGitServiceClass {
       try {
         const coneConfig = execSync('git config core.sparseCheckoutCone', {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
         cone = coneConfig.trim() === 'true';
       } catch {
@@ -438,7 +409,7 @@ class AdvancedGitServiceClass {
         try {
           const list = execSync('git sparse-checkout list', {
             cwd: repoPath,
-            encoding: 'utf-8'
+            encoding: 'utf-8',
           });
           patterns = list.split('\n').filter((p: string) => p.trim());
         } catch {
@@ -457,8 +428,6 @@ class AdvancedGitServiceClass {
    */
   public async disableSparseCheckout(repoPath: string): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync('git sparse-checkout disable', { cwd: repoPath });
 
       vscode.window.showInformationMessage('Sparse checkout disabled');
@@ -479,7 +448,6 @@ class AdvancedGitServiceClass {
     options: { since?: string; count?: number; outputDir?: string }
   ): Promise<string[]> {
     try {
-      const { execSync } = require('child_process');
       const outputDir = options.outputDir || repoPath;
 
       let command = 'git format-patch';
@@ -515,8 +483,6 @@ class AdvancedGitServiceClass {
     options?: { check?: boolean; threeWay?: boolean }
   ): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       let command = 'git apply';
       if (options?.check) {
         command += ' --check';
@@ -549,8 +515,6 @@ class AdvancedGitServiceClass {
     options?: { threeWay?: boolean; signoff?: boolean }
   ): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       let command = 'git am';
       if (options?.threeWay) {
         command += ' --3way';
@@ -584,11 +548,9 @@ class AdvancedGitServiceClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Running git garbage collection...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-
           let command = 'git gc';
           if (options?.aggressive) {
             command += ' --aggressive';
@@ -614,16 +576,16 @@ class AdvancedGitServiceClass {
    */
   public async fsck(repoPath: string): Promise<{ valid: boolean; issues: string[] }> {
     try {
-      const { execSync } = require('child_process');
-
       const result = execSync('git fsck --full', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
-      const issues = result.split('\n').filter((l: string) => 
-        l.includes('error') || l.includes('warning') || l.includes('dangling')
-      );
+      const issues = result
+        .split('\n')
+        .filter(
+          (l: string) => l.includes('error') || l.includes('warning') || l.includes('dangling')
+        );
 
       if (issues.length === 0) {
         vscode.window.showInformationMessage('Repository integrity check passed');
@@ -643,8 +605,6 @@ class AdvancedGitServiceClass {
    */
   public async prune(repoPath: string, dryRun: boolean = false): Promise<string[]> {
     try {
-      const { execSync } = require('child_process');
-
       const command = dryRun ? 'git prune --dry-run' : 'git prune';
       const result = execSync(command, { cwd: repoPath, encoding: 'utf-8' });
 
@@ -666,20 +626,18 @@ class AdvancedGitServiceClass {
    */
   public async getRepoStats(repoPath: string): Promise<MaintenanceInfo> {
     try {
-      const { execSync } = require('child_process');
-
       // Count objects
       let objectCount = 0;
       let sizeKb = 0;
       try {
         const countResult = execSync('git count-objects -v', {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
-        
+
         const countMatch = countResult.match(/count:\s+(\d+)/);
         const sizeMatch = countResult.match(/size:\s+(\d+)/);
-        
+
         objectCount = countMatch ? parseInt(countMatch[1]) : 0;
         sizeKb = sizeMatch ? parseInt(sizeMatch[1]) : 0;
       } catch {
@@ -699,7 +657,7 @@ class AdvancedGitServiceClass {
       try {
         const pruneResult = execSync('git prune --dry-run 2>&1', {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
         pruneableObjects = pruneResult.split('\n').filter((l: string) => l.trim()).length;
       } catch {
@@ -710,7 +668,7 @@ class AdvancedGitServiceClass {
         objectCount,
         packCount,
         sizeKb,
-        pruneableObjects
+        pruneableObjects,
       };
     } catch (error) {
       logger.error('Failed to get repo stats', error);
@@ -723,14 +681,8 @@ class AdvancedGitServiceClass {
   /**
    * Create a bundle file
    */
-  public async createBundle(
-    repoPath: string,
-    bundlePath: string,
-    refs?: string[]
-  ): Promise<void> {
+  public async createBundle(repoPath: string, bundlePath: string, refs?: string[]): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       const refsArg = refs && refs.length > 0 ? refs.join(' ') : '--all';
       execSync(`git bundle create "${bundlePath}" ${refsArg}`, { cwd: repoPath });
 
@@ -747,8 +699,6 @@ class AdvancedGitServiceClass {
    */
   public async verifyBundle(repoPath: string, bundlePath: string): Promise<boolean> {
     try {
-      const { execSync } = require('child_process');
-
       execSync(`git bundle verify "${bundlePath}"`, { cwd: repoPath });
       vscode.window.showInformationMessage('Bundle is valid');
       return true;
@@ -769,8 +719,6 @@ class AdvancedGitServiceClass {
     options?: { format?: 'zip' | 'tar' | 'tar.gz'; ref?: string; prefix?: string }
   ): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       const format = options?.format || 'zip';
       const ref = options?.ref || 'HEAD';
 
@@ -795,14 +743,8 @@ class AdvancedGitServiceClass {
   /**
    * Add a note to a commit
    */
-  public async addNote(
-    repoPath: string,
-    commit: string,
-    message: string
-  ): Promise<void> {
+  public async addNote(repoPath: string, commit: string, message: string): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync(`git notes add -m "${message}" ${commit}`, { cwd: repoPath });
 
       vscode.window.showInformationMessage('Note added');
@@ -818,11 +760,9 @@ class AdvancedGitServiceClass {
    */
   public async getNote(repoPath: string, commit: string): Promise<string | undefined> {
     try {
-      const { execSync } = require('child_process');
-
       const result = execSync(`git notes show ${commit}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
       return result.trim();
@@ -836,18 +776,16 @@ class AdvancedGitServiceClass {
    */
   public async listNotes(repoPath: string): Promise<Array<{ commit: string; note: string }>> {
     try {
-      const { execSync } = require('child_process');
-
       const result = execSync('git notes list', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
       const notes: Array<{ commit: string; note: string }> = [];
       const lines = result.split('\n').filter((l: string) => l.trim());
 
       for (const line of lines) {
-        const [noteBlob, commit] = line.split(' ');
+        const [, commit] = line.split(' ');
         if (commit) {
           const note = await this.getNote(repoPath, commit);
           if (note) {
@@ -867,8 +805,6 @@ class AdvancedGitServiceClass {
    */
   public async removeNote(repoPath: string, commit: string): Promise<void> {
     try {
-      const { execSync } = require('child_process');
-
       execSync(`git notes remove ${commit}`, { cwd: repoPath });
 
       vscode.window.showInformationMessage('Note removed');
@@ -892,7 +828,7 @@ class AdvancedGitServiceClass {
     if (diffMins < 60) return `${diffMins} minutes ago`;
     if (diffHours < 24) return `${diffHours} hours ago`;
     if (diffDays < 30) return `${diffDays} days ago`;
-    
+
     return date.toLocaleDateString();
   }
 

@@ -209,10 +209,10 @@ export function registerStashProvider(
  */
 function registerStashContextMenuCommands(
   context: vscode.ExtensionContext,
-  stashProvider: StashProvider,
-  gitService: GitService,
-  repositoryManager: RepositoryManager,
-  eventBus: EventBus
+  _stashProvider: StashProvider,
+  _gitService: GitService,
+  _repositoryManager: RepositoryManager,
+  _eventBus: EventBus
 ): void {
   // Apply stash
   const applyStashCommand = vscode.commands.registerCommand(

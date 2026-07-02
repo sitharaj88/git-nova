@@ -1,101 +1,111 @@
 /**
  * Commands for branch operations
  */
-export namespace BranchCommands {
-  export const Create = 'gitNova.branch.create';
-  export const Delete = 'gitNova.branch.delete';
-  export const Switch = 'gitNova.branch.switch';
-  export const Rename = 'gitNova.branch.rename';
-  export const Compare = 'gitNova.branch.compare';
-  export const CheckoutNew = 'gitNova.branch.checkoutNew';
-  export const Checkout = 'gitNova.branch.checkout';
-  export const Merge = 'gitNova.branch.merge';
-  export const Fetch = 'gitNova.branch.fetch';
-  export const Push = 'gitNova.branch.push';
-  export const Pull = 'gitNova.branch.pull';
-  export const Track = 'gitNova.branch.track';
-  export const Untrack = 'gitNova.branch.untrack';
-}
+export const BranchCommands = {
+  Create: 'gitNova.branch.create',
+  Delete: 'gitNova.branch.delete',
+  Switch: 'gitNova.branch.switch',
+  Rename: 'gitNova.branch.rename',
+  Compare: 'gitNova.branch.compare',
+  CheckoutNew: 'gitNova.branch.checkoutNew',
+  Checkout: 'gitNova.branch.checkout',
+  Merge: 'gitNova.branch.merge',
+  Fetch: 'gitNova.branch.fetch',
+  Push: 'gitNova.branch.push',
+  Pull: 'gitNova.branch.pull',
+  Track: 'gitNova.branch.track',
+  Untrack: 'gitNova.branch.untrack',
+} as const;
 
 /**
  * Commands for commit operations
  */
-export namespace CommitCommands {
-  export const Create = 'gitNova.commit.create';
-  export const Amend = 'gitNova.commit.amend';
-  export const ViewHistory = 'gitNova.commit.viewHistory';
-  export const Show = 'gitNova.commit.show';
-  export const Log = 'gitNova.commit.log';
-  export const Search = 'gitNova.commit.search';
-  export const CherryPick = 'gitNova.commit.cherryPick';
-  export const Revert = 'gitNova.commit.revert';
-  export const Reset = 'gitNova.commit.reset';
-  export const Squash = 'gitNova.commit.squash';
-  export const Fixup = 'gitNova.commit.fixup';
-  export const EditMessage = 'gitNova.commit.editMessage';
-  export const Filter = 'gitNova.commit.filter';
-}
+export const CommitCommands = {
+  Create: 'gitNova.commit.create',
+  Amend: 'gitNova.commit.amend',
+  ViewHistory: 'gitNova.commit.viewHistory',
+  Show: 'gitNova.commit.show',
+  Log: 'gitNova.commit.log',
+  Search: 'gitNova.commit.search',
+  CherryPick: 'gitNova.commit.cherryPick',
+  Revert: 'gitNova.commit.revert',
+  Reset: 'gitNova.commit.reset',
+  Squash: 'gitNova.commit.squash',
+  Fixup: 'gitNova.commit.fixup',
+  EditMessage: 'gitNova.commit.editMessage',
+  Filter: 'gitNova.commit.filter',
+} as const;
 
 /**
  * Commands for diff operations
  */
-export namespace DiffCommands {
-  export const ViewFileDiff = 'gitNova.diff.viewFile';
-  export const ViewStaged = 'gitNova.diff.viewStaged';
-  export const ViewUnstaged = 'gitNova.diff.viewUnstaged';
-  export const CompareCommits = 'gitNova.diff.compareCommits';
-  export const CompareBranches = 'gitNova.diff.compareBranches';
-  export const DiscardChanges = 'gitNova.discardChanges';
-  export const DiscardAllChanges = 'gitNova.discardAllChanges';
-  export const StageFile = 'gitNova.diff.stageFile';
-  export const UnstageFile = 'gitNova.diff.unstageFile';
-}
+export const DiffCommands = {
+  ViewFileDiff: 'gitNova.diff.viewFile',
+  ViewStaged: 'gitNova.diff.viewStaged',
+  ViewUnstaged: 'gitNova.diff.viewUnstaged',
+  ViewCommit: 'gitNova.diff.viewCommit',
+  CompareCommits: 'gitNova.diff.compareCommits',
+  CompareBranches: 'gitNova.diff.compareBranches',
+  OpenViewer: 'gitNova.diff.openViewer',
+  DiscardChanges: 'gitNova.discardChanges',
+  DiscardAllChanges: 'gitNova.discardAllChanges',
+  StageFile: 'gitNova.diff.stageFile',
+  UnstageFile: 'gitNova.diff.unstageFile',
+} as const;
 
 /**
  * Commands for stash operations
  */
-export namespace StashCommands {
-  export const Create = 'gitNova.stash.create';
-  export const Pop = 'gitNova.stash.pop';
-  export const Apply = 'gitNova.stash.apply';
-  export const Drop = 'gitNova.stash.drop';
-  export const List = 'gitNova.stash.list';
-  export const Clear = 'gitNova.stash.clear';
-}
+export const StashCommands = {
+  Create: 'gitNova.stash.create',
+  Pop: 'gitNova.stash.pop',
+  Apply: 'gitNova.stash.apply',
+  Drop: 'gitNova.stash.drop',
+  List: 'gitNova.stash.list',
+  Clear: 'gitNova.stash.clear',
+} as const;
 
 /**
  * Commands for rebase operations
  */
-export namespace RebaseCommands {
-  export const Start = 'gitNova.rebase.start';
-  export const Interactive = 'gitNova.rebase.interactive';
-  export const Continue = 'gitNova.rebase.continue';
-  export const Abort = 'gitNova.rebase.abort';
-  export const Skip = 'gitNova.rebase.skip';
-  export const EditTodo = 'gitNova.rebase.editTodo';
-}
+export const RebaseCommands = {
+  Start: 'gitNova.rebase.start',
+  Interactive: 'gitNova.rebase.interactive',
+  InteractiveEditor: 'gitNova.rebase.interactiveEditor',
+  Continue: 'gitNova.rebase.continue',
+  Abort: 'gitNova.rebase.abort',
+  Skip: 'gitNova.rebase.skip',
+  EditTodo: 'gitNova.rebase.editTodo',
+} as const;
 
 /**
  * Commands for merge operations
  */
-export namespace MergeCommands {
-  export const Start = 'gitNova.merge.start';
-  export const Continue = 'gitNova.merge.continue';
-  export const Abort = 'gitNova.merge.abort';
-  export const ResolveConflict = 'gitNova.merge.resolveConflict';
-  export const AcceptOurs = 'gitNova.merge.acceptOurs';
-  export const AcceptTheirs = 'gitNova.merge.acceptTheirs';
-}
+export const MergeCommands = {
+  Start: 'gitNova.merge.start',
+  Continue: 'gitNova.merge.continue',
+  Abort: 'gitNova.merge.abort',
+  ResolveConflict: 'gitNova.merge.resolveConflict',
+  AcceptOurs: 'gitNova.merge.acceptOurs',
+  AcceptTheirs: 'gitNova.merge.acceptTheirs',
+} as const;
+
+/**
+ * Commands for in-progress operation handling (rebase/merge/cherry-pick)
+ */
+export const OperationCommands = {
+  ShowActions: 'gitNova.operation.showActions',
+} as const;
 
 /**
  * Commands for remote operations
  */
-export namespace RemoteCommands {
-  export const Fetch = 'gitNova.remote.fetch';
-  export const Pull = 'gitNova.remote.pull';
-  export const Push = 'gitNova.remote.push';
-  export const Add = 'gitNova.remote.add';
-  export const Remove = 'gitNova.remote.remove';
-  export const SetUrl = 'gitNova.remote.setUrl';
-  export const Prune = 'gitNova.remote.prune';
-}
+export const RemoteCommands = {
+  Fetch: 'gitNova.remote.fetch',
+  Pull: 'gitNova.remote.pull',
+  Push: 'gitNova.remote.push',
+  Add: 'gitNova.remote.add',
+  Remove: 'gitNova.remote.remove',
+  SetUrl: 'gitNova.remote.setUrl',
+  Prune: 'gitNova.remote.prune',
+} as const;

@@ -102,13 +102,6 @@ describe('ConfigManager Unit Tests', () => {
       assert.ok(['full', 'compact'].includes(value));
     });
 
-    it('should get diffViewMode configuration', () => {
-      const config = configManager.getConfig();
-      const value = config.diffViewMode;
-
-      assert.ok(['unified', 'side-by-side'].includes(value));
-    });
-
     it('should get ignoreWhitespace configuration', () => {
       const config = configManager.getConfig();
       const value = config.ignoreWhitespace;
@@ -269,7 +262,6 @@ describe('ConfigManager Unit Tests', () => {
       assert.strictEqual(defaultConfig.commitMessageTemplate, '');
       assert.strictEqual(defaultConfig.showCommitGraph, true);
       assert.strictEqual(defaultConfig.commitDisplayFormat, 'full');
-      assert.strictEqual(defaultConfig.diffViewMode, 'unified');
       assert.strictEqual(defaultConfig.ignoreWhitespace, false);
       assert.strictEqual(defaultConfig.showLineNumbers, true);
       assert.strictEqual(defaultConfig.autoStashBeforeRebase, false);

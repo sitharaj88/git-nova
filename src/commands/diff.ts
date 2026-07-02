@@ -1,9 +1,36 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
 import { DiffCommands } from '../constants/commands';
+import { Diff } from '../models/diff';
+import { FileStatus } from '../models/commit';
+import { toRevisionUri, toEmptyUri } from '../providers/revisionContentProvider';
 import { logger } from '../utils/logger';
+
+/**
+ * Whether whitespace-only changes should be excluded from diff summaries
+ */
+function ignoreWhitespaceEnabled(): boolean {
+  return vscode.workspace.getConfiguration('gitNova').get<boolean>('ignoreWhitespace', false);
+}
+
+/**
+ * File name portion of a repository-relative path
+ */
+function baseName(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
+
+/**
+ * Uri of a file in the working tree (falls back to the raw path when the
+ * repository root is unknown)
+ */
+function workingTreeUri(repoRoot: string | undefined, filePath: string): vscode.Uri {
+  return vscode.Uri.file(repoRoot ? path.join(repoRoot, filePath) : filePath);
+}
 
 /**
  * Show error notification to user
@@ -52,23 +79,43 @@ export function registerDiffCommands(
     DiffCommands.ViewFileDiff,
     async (filePath?: string) => {
       try {
-        const file =
-          filePath ||
-          (await vscode.window.showInputBox({
-            prompt: 'Enter file path',
-            placeHolder: 'path/to/file.ts',
-          }));
+        let file = filePath;
+
+        if (!file) {
+          const status = await gitService.getWorkingTreeStatus();
+          const changed = status.staged.concat(status.unstaged, status.untracked);
+
+          if (changed.length === 0) {
+            showInfoNotification('No changes in the working tree');
+            return;
+          }
+
+          const pick = await vscode.window.showQuickPick(
+            changed.map(f => ({
+              label: f.path,
+              description: `${f.indexStatus}${f.worktreeStatus}`.trim(),
+            })),
+            {
+              placeHolder: 'Select file to diff against HEAD',
+            }
+          );
+          file = pick?.label;
+        }
 
         if (!file) {
           return;
         }
 
-        await executeWithProgress('Loading file diff...', async progress => {
-          progress.report({ message: `Loading diff for ${file}...` });
-          const diff = await gitService.getFileDiff(file);
-          showFileDiff(file, diff);
-          showInfoNotification(`Diff for ${file} loaded`);
-        });
+        // Native diff: HEAD on the left, working tree on the right
+        const workingTree = workingTreeUri(repositoryManager.getActiveRepository()?.path, file);
+        const right = fs.existsSync(workingTree.fsPath) ? workingTree : toEmptyUri(file);
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          toRevisionUri(file, 'HEAD'),
+          right,
+          `${baseName(file)} (HEAD ↔ Working Tree)`,
+          { preview: true }
+        );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         showErrorNotification(`Failed to view file diff: ${errorMessage}`);
@@ -80,12 +127,43 @@ export function registerDiffCommands(
   // ==================== View Staged Diffs ====================
   const viewStagedCommand = vscode.commands.registerCommand(DiffCommands.ViewStaged, async () => {
     try {
-      await executeWithProgress('Loading staged diffs...', async progress => {
-        progress.report({ message: 'Fetching staged changes...' });
-        const diffs = await gitService.getStagedDiffs();
-        showDiffs('Staged Changes', diffs);
-        showInfoNotification(`Found ${diffs.length} staged changes`);
-      });
+      const status = await gitService.getWorkingTreeStatus();
+      const files = status.staged;
+
+      if (files.length === 0) {
+        showInfoNotification('No staged changes');
+        return;
+      }
+
+      // Re-show the picker after each diff so several files can be reviewed
+      for (;;) {
+        const pick = await vscode.window.showQuickPick(
+          files.map(f => ({
+            label: f.path,
+            description: `${f.indexStatus}`.trim(),
+          })),
+          {
+            placeHolder: `Staged changes (${files.length} file${files.length !== 1 ? 's' : ''}) — select one to open its diff`,
+          }
+        );
+
+        if (!pick) {
+          return;
+        }
+
+        // Native diff: HEAD on the left, index on the right
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          toRevisionUri(pick.label, 'HEAD'),
+          toRevisionUri(pick.label, ':0'),
+          `${baseName(pick.label)} (Staged)`,
+          { preview: true }
+        );
+
+        if (files.length === 1) {
+          return;
+        }
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       showErrorNotification(`Failed to view staged diffs: ${errorMessage}`);
@@ -98,12 +176,52 @@ export function registerDiffCommands(
     DiffCommands.ViewUnstaged,
     async () => {
       try {
-        await executeWithProgress('Loading unstaged diffs...', async progress => {
-          progress.report({ message: 'Fetching unstaged changes...' });
-          const diffs = await gitService.getUnstagedDiffs();
-          showDiffs('Unstaged Changes', diffs);
-          showInfoNotification(`Found ${diffs.length} unstaged changes`);
-        });
+        const status = await gitService.getWorkingTreeStatus();
+        const files = status.unstaged.concat(status.untracked);
+
+        if (files.length === 0) {
+          showInfoNotification('No unstaged changes');
+          return;
+        }
+
+        const repoRoot = repositoryManager.getActiveRepository()?.path;
+
+        // Re-show the picker after each diff so several files can be reviewed
+        for (;;) {
+          const pick = await vscode.window.showQuickPick(
+            files.map(f => ({
+              label: f.path,
+              description: `${f.worktreeStatus}`.trim(),
+              file: f,
+            })),
+            {
+              placeHolder: `Unstaged changes (${files.length} file${files.length !== 1 ? 's' : ''}) — select one to open its diff`,
+            }
+          );
+
+          if (!pick) {
+            return;
+          }
+
+          // Native diff: index on the left, working tree on the right
+          const untracked =
+            pick.file.worktreeStatus === FileStatus.Untracked ||
+            pick.file.indexStatus === FileStatus.Untracked;
+          const deleted = pick.file.worktreeStatus === FileStatus.Deleted;
+          const left = untracked ? toEmptyUri(pick.label) : toRevisionUri(pick.label, ':0');
+          const right = deleted ? toEmptyUri(pick.label) : workingTreeUri(repoRoot, pick.label);
+          await vscode.commands.executeCommand(
+            'vscode.diff',
+            left,
+            right,
+            `${baseName(pick.label)} (Working Tree)`,
+            { preview: true }
+          );
+
+          if (files.length === 1) {
+            return;
+          }
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         showErrorNotification(`Failed to view unstaged diffs: ${errorMessage}`);
@@ -135,12 +253,19 @@ export function registerDiffCommands(
           return;
         }
 
-        await executeWithProgress('Comparing commits...', async progress => {
+        const files = await executeWithProgress('Comparing commits...', async progress => {
           progress.report({ message: `Comparing ${commit1} with ${commit2}...` });
-          const diff = await gitService.getFileDiff('.', `${commit1}..${commit2}`);
-          showFileDiff(`${commit1}..${commit2}`, diff);
-          showInfoNotification(`Compared commits ${commit1} and ${commit2}`);
+          return gitService.getChangedFilesBetween(commit1, commit2, {
+            ignoreWhitespace: ignoreWhitespaceEnabled(),
+          });
         });
+
+        await pickAndOpenDiffs(
+          files,
+          commit1,
+          commit2,
+          `${commit1.substring(0, 7)} ↔ ${commit2.substring(0, 7)}`
+        );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         showErrorNotification(`Failed to compare commits: ${errorMessage}`);
@@ -188,12 +313,19 @@ export function registerDiffCommands(
           return;
         }
 
-        await executeWithProgress('Comparing branches...', async progress => {
+        const files = await executeWithProgress('Comparing branches...', async progress => {
           progress.report({ message: `Comparing ${branch1.label} with ${branch2.label}...` });
-          const diff = await gitService.compareBranches(branch1.label, branch2.label);
-          showBranchComparison(branch1.label, branch2.label, diff);
-          showInfoNotification(`Compared branches ${branch1.label} and ${branch2.label}`);
+          return gitService.getChangedFilesBetween(branch1.label, branch2.label, {
+            ignoreWhitespace: ignoreWhitespaceEnabled(),
+          });
         });
+
+        await pickAndOpenDiffs(
+          files,
+          branch1.label,
+          branch2.label,
+          `${branch1.label} ↔ ${branch2.label}`
+        );
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         showErrorNotification(`Failed to compare branches: ${errorMessage}`);
@@ -201,6 +333,60 @@ export function registerDiffCommands(
     }
   );
   context.subscriptions.push(compareBranchesCommand);
+
+  // ==================== View Commit Changes ====================
+  const viewCommitCommand = vscode.commands.registerCommand(
+    DiffCommands.ViewCommit,
+    async (hash?: string) => {
+      try {
+        const commitHash =
+          hash ||
+          (await vscode.window.showInputBox({
+            prompt: 'Enter commit hash',
+            placeHolder: 'abc1234',
+          }));
+
+        if (!commitHash) {
+          return;
+        }
+
+        const commit = await gitService.getCommit(commitHash);
+
+        if (!commit.files || commit.files.length === 0) {
+          showInfoNotification(`No file changes in commit ${commitHash.substring(0, 7)}`);
+          return;
+        }
+
+        const file =
+          commit.files.length === 1
+            ? { label: commit.files[0].path }
+            : await vscode.window.showQuickPick(
+                commit.files.map(f => ({
+                  label: f.path,
+                  description: `+${f.additions} -${f.deletions}`,
+                })),
+                {
+                  placeHolder: `Select file changed in ${commitHash.substring(0, 7)}`,
+                }
+              );
+
+        if (!file) {
+          return;
+        }
+
+        // Opens a native side-by-side diff via the gitnova-rev content provider
+        await vscode.commands.executeCommand(
+          'gitNova.commit.file.openDiff',
+          commitHash,
+          file.label
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        showErrorNotification(`Failed to view commit changes: ${errorMessage}`);
+      }
+    }
+  );
+  context.subscriptions.push(viewCommitCommand);
 
   // ==================== Discard Changes ====================
   const discardChangesCommand = vscode.commands.registerCommand(
@@ -401,78 +587,48 @@ export function registerDiffCommands(
 }
 
 /**
- * Show file diff in a new document
+ * QuickPick summary of the files changed between two refs; each selection
+ * opens a native side-by-side diff, and the picker re-opens until dismissed.
  */
-function showFileDiff(filePath: string, diff: any): void {
-  const content = [
-    `Diff for: ${filePath}`,
-    '',
-    'Hunks:',
-    ...diff.hunks.map((hunk: any, index: number) =>
-      [
-        `Hunk ${index + 1}:`,
-        `  Old: ${hunk.oldStart}, ${hunk.oldLines} lines`,
-        `  New: ${hunk.newStart}, ${hunk.newLines} lines`,
-        ...hunk.lines.map((line: any) => `  ${line.content}`),
-      ].flat()
-    ),
-  ].join('\n');
-
-  vscode.workspace
-    .openTextDocument({
-      content,
-      language: 'diff',
-    })
-    .then((doc: vscode.TextDocument) => vscode.window.showTextDocument(doc));
-}
-
-/**
- * Show diffs in a new document
- */
-function showDiffs(title: string, diffs: any[]): void {
-  if (diffs.length === 0) {
-    vscode.window.showInformationMessage(`No ${title.toLowerCase()}`);
+async function pickAndOpenDiffs(
+  files: Diff[],
+  fromRef: string,
+  toRef: string,
+  comparisonLabel: string
+): Promise<void> {
+  if (files.length === 0) {
+    showInfoNotification(`No changes between ${fromRef} and ${toRef}`);
     return;
   }
 
-  const content = [
-    title,
-    `Total: ${diffs.length} files`,
-    '',
-    ...diffs.map((diff, index) =>
-      [
-        `${index + 1}. ${diff.filePath}`,
-        `   Hunks: ${diff.hunks.length}`,
-        `   Binary: ${diff.isBinary ? 'Yes' : 'No'}`,
-      ].flat()
-    ),
-  ].join('\n');
+  const additions = files.reduce((sum, f) => sum + f.additions, 0);
+  const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
 
-  vscode.workspace
-    .openTextDocument({
-      content,
-      language: 'plaintext',
-    })
-    .then((doc: vscode.TextDocument) => vscode.window.showTextDocument(doc));
-}
+  for (;;) {
+    const pick = await vscode.window.showQuickPick(
+      files.map(f => ({
+        label: f.filePath,
+        description: `+${f.additions} -${f.deletions}`,
+      })),
+      {
+        placeHolder: `${comparisonLabel}: ${files.length} file${files.length !== 1 ? 's' : ''} changed, +${additions} -${deletions} — select one to open its diff`,
+      }
+    );
 
-/**
- * Show branch comparison in a new document
- */
-function showBranchComparison(branch1: string, branch2: string, diff: any): void {
-  const content = [
-    `Branch Comparison: ${branch1} vs ${branch2}`,
-    '',
-    `Files changed: ${diff.filePath}`,
-    `Additions: ${diff.additions}`,
-    `Deletions: ${diff.deletions}`,
-    `Staged: ${diff.isStaged ? 'Yes' : 'No'}`,
-  ].join('\n');
+    if (!pick) {
+      return;
+    }
 
-  vscode.workspace
-    .openTextDocument({
-      content,
-      language: 'plaintext',
-    })
-    .then((doc: vscode.TextDocument) => vscode.window.showTextDocument(doc));
+    await vscode.commands.executeCommand(
+      'vscode.diff',
+      toRevisionUri(pick.label, fromRef),
+      toRevisionUri(pick.label, toRef),
+      `${baseName(pick.label)} (${comparisonLabel})`,
+      { preview: true }
+    );
+
+    if (files.length === 1) {
+      return;
+    }
+  }
 }

@@ -28,16 +28,6 @@ abstract class RemoteTreeItem extends vscode.TreeItem {
 }
 
 /**
- * Root item for remote tree
- */
-class RootItem extends RemoteTreeItem {
-  constructor() {
-    super('Remotes', TreeItemType.Root, vscode.TreeItemCollapsibleState.Expanded);
-    this.iconPath = new vscode.ThemeIcon('cloud');
-  }
-}
-
-/**
  * Remote item
  */
 class RemoteItem extends RemoteTreeItem {
@@ -221,10 +211,10 @@ export function registerRemoteProvider(
  */
 function registerRemoteContextMenuCommands(
   context: vscode.ExtensionContext,
-  remoteProvider: RemoteProvider,
-  gitService: GitService,
-  repositoryManager: RepositoryManager,
-  eventBus: EventBus
+  _remoteProvider: RemoteProvider,
+  _gitService: GitService,
+  _repositoryManager: RepositoryManager,
+  _eventBus: EventBus
 ): void {
   // Fetch remote
   const fetchCommand = vscode.commands.registerCommand(

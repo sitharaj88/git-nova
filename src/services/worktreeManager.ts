@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { exec } from 'child_process';
 import { GitService } from '../core/gitService';
 import { logger } from '../utils/logger';
 import { performanceMonitor } from './performanceMonitor';
@@ -56,19 +57,16 @@ export class WorktreeManager {
    */
   initialize(context: vscode.ExtensionContext, gitService: GitService): void {
     this.gitService = gitService;
-    
+
     // Create status bar item
-    this.statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      80
-    );
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
     this.statusBarItem.name = 'GitNova Worktree';
     this.statusBarItem.command = 'gitNova.worktree.list';
     context.subscriptions.push(this.statusBarItem);
-    
+
     // Initial load
     this.refreshWorktrees();
-    
+
     logger.info('WorktreeManager initialized');
   }
 
@@ -110,7 +108,7 @@ export class WorktreeManager {
 
       // Execute git worktree list --porcelain
       const result = await this.executeGitCommand(['worktree', 'list', '--porcelain']);
-      
+
       return this.parseWorktreeOutput(result, repoPath);
     } catch (error) {
       logger.error('Failed to list worktrees', error);
@@ -208,14 +206,14 @@ export class WorktreeManager {
       }
 
       await this.executeGitCommand(args);
-      
+
       await this.refreshWorktrees();
-      
+
       const newWorktree = this.worktrees.find(w => w.path === worktreePath);
-      
+
       logger.info(`Worktree created: ${worktreePath}`);
       vscode.window.showInformationMessage(`Worktree created at ${worktreePath}`);
-      
+
       return newWorktree;
     } catch (error) {
       logger.error('Failed to create worktree', error);
@@ -237,16 +235,16 @@ export class WorktreeManager {
 
     try {
       const args = ['worktree', 'remove'];
-      
+
       if (force) {
         args.push('--force');
       }
-      
+
       args.push(worktreePath);
 
       await this.executeGitCommand(args);
       await this.refreshWorktrees();
-      
+
       logger.info(`Worktree removed: ${worktreePath}`);
       vscode.window.showInformationMessage(`Worktree removed: ${worktreePath}`);
     } catch (error) {
@@ -268,7 +266,7 @@ export class WorktreeManager {
     try {
       await this.executeGitCommand(['worktree', 'prune']);
       await this.refreshWorktrees();
-      
+
       logger.info('Worktrees pruned');
       vscode.window.showInformationMessage('Stale worktrees pruned');
     } catch (error) {
@@ -287,14 +285,14 @@ export class WorktreeManager {
 
     try {
       const args = ['worktree', 'lock', worktreePath];
-      
+
       if (reason) {
         args.push('--reason', reason);
       }
 
       await this.executeGitCommand(args);
       await this.refreshWorktrees();
-      
+
       logger.info(`Worktree locked: ${worktreePath}`);
     } catch (error) {
       logger.error('Failed to lock worktree', error);
@@ -313,7 +311,7 @@ export class WorktreeManager {
     try {
       await this.executeGitCommand(['worktree', 'unlock', worktreePath]);
       await this.refreshWorktrees();
-      
+
       logger.info(`Worktree unlocked: ${worktreePath}`);
     } catch (error) {
       logger.error('Failed to unlock worktree', error);
@@ -332,7 +330,7 @@ export class WorktreeManager {
     try {
       await this.executeGitCommand(['worktree', 'move', oldPath, newPath]);
       await this.refreshWorktrees();
-      
+
       logger.info(`Worktree moved from ${oldPath} to ${newPath}`);
     } catch (error) {
       logger.error('Failed to move worktree', error);
@@ -359,7 +357,6 @@ export class WorktreeManager {
     }
 
     return new Promise((resolve, reject) => {
-      const { exec } = require('child_process');
       exec(
         `git ${args.join(' ')}`,
         { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
@@ -383,9 +380,9 @@ export class WorktreeManager {
     const count = this.worktrees.length;
     if (count > 1) {
       this.statusBarItem.text = `$(git-branch) ${count} worktrees`;
-      this.statusBarItem.tooltip = this.worktrees.map(w => 
-        `${w.isMain ? '⭐ ' : ''}${w.name}: ${w.branch}`
-      ).join('\n');
+      this.statusBarItem.tooltip = this.worktrees
+        .map(w => `${w.isMain ? '⭐ ' : ''}${w.name}: ${w.branch}`)
+        .join('\n');
       this.statusBarItem.show();
     } else {
       this.statusBarItem.hide();
@@ -439,13 +436,16 @@ export class WorktreeManager {
     const worktreePath = path.join(location[0].fsPath, name);
 
     // Select branch option
-    const branchOption = await vscode.window.showQuickPick([
-      { label: 'New Branch', description: 'Create a new branch for this worktree' },
-      { label: 'Existing Branch', description: 'Use an existing branch' },
-      { label: 'Detached HEAD', description: 'Create with detached HEAD' },
-    ], {
-      placeHolder: 'Select branch option',
-    });
+    const branchOption = await vscode.window.showQuickPick(
+      [
+        { label: 'New Branch', description: 'Create a new branch for this worktree' },
+        { label: 'Existing Branch', description: 'Use an existing branch' },
+        { label: 'Detached HEAD', description: 'Create with detached HEAD' },
+      ],
+      {
+        placeHolder: 'Select branch option',
+      }
+    );
 
     if (!branchOption) return;
 

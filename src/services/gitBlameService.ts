@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import { exec } from 'child_process';
 import { GitService } from '../core/gitService';
 import { logger } from '../utils/logger';
 import { performanceMonitor } from './performanceMonitor';
+import { autolinkService } from './autolinkService';
 
 /**
  * Blame line information
@@ -46,9 +48,9 @@ export interface BlameCommit {
  */
 export interface BlameDecorationConfig {
   format: string;
-  dateFormat: 'relative' | 'absolute' | 'both';
+  dateFormat: 'relative' | 'short' | 'full';
   showInline: boolean;
-  showInGutter: boolean;
+  showStatusBar: boolean;
   highlightRecentCommits: boolean;
   recentCommitDays: number;
 }
@@ -60,7 +62,7 @@ const DEFAULT_DECORATION_CONFIG: BlameDecorationConfig = {
   format: '{{author}}, {{date}} • {{summary}}',
   dateFormat: 'relative',
   showInline: true,
-  showInGutter: false,
+  showStatusBar: true,
   highlightRecentCommits: true,
   recentCommitDays: 7,
 };
@@ -73,12 +75,14 @@ export class GitBlameService {
   private gitService: GitService | null = null;
   private blameCache: Map<string, BlameInfo> = new Map();
   private decorationType: vscode.TextEditorDecorationType | null = null;
-  private gutterDecorationType: vscode.TextEditorDecorationType | null = null;
   private activeEditor: vscode.TextEditor | null = null;
   private config: BlameDecorationConfig;
   private disposables: vscode.Disposable[] = [];
   private isEnabled: boolean = false;
   private hoverProvider: vscode.Disposable | null = null;
+  private statusBarItem: vscode.StatusBarItem | null = null;
+  private statusBarDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private blameFailures: Set<string> = new Set();
 
   private constructor() {
     this.config = { ...DEFAULT_DECORATION_CONFIG };
@@ -103,48 +107,64 @@ export class GitBlameService {
     this.createDecorationTypes();
 
     // Watch for editor changes
-    const editorChangeListener = vscode.window.onDidChangeActiveTextEditor((editor: vscode.TextEditor | undefined) => {
-      this.activeEditor = editor || null;
-      if (this.isEnabled && editor) {
-        this.updateDecorations(editor);
+    const editorChangeListener = vscode.window.onDidChangeActiveTextEditor(
+      (editor: vscode.TextEditor | undefined) => {
+        this.activeEditor = editor || null;
+        if (this.isEnabled && editor) {
+          this.updateDecorations(editor);
+        }
+        this.debounceStatusBarUpdate(editor || null);
       }
-    });
+    );
     this.disposables.push(editorChangeListener);
 
-    // Watch for document changes
-    const documentChangeListener = vscode.workspace.onDidChangeTextDocument((e: vscode.TextDocumentChangeEvent) => {
-      // Invalidate cache for changed document
-      const filePath = e.document.uri.fsPath;
-      this.blameCache.delete(filePath);
-      
-      if (this.isEnabled && this.activeEditor?.document === e.document) {
-        this.debounceUpdateDecorations(this.activeEditor);
-      }
-    });
-    this.disposables.push(documentChangeListener);
-
-    // Watch for selection changes (for current line blame)
-    const selectionChangeListener = vscode.window.onDidChangeTextEditorSelection((e: vscode.TextEditorSelectionChangeEvent) => {
-      if (this.isEnabled && this.activeEditor === e.textEditor) {
-        this.updateCurrentLineDecoration(e.textEditor);
-      }
-    });
-    this.disposables.push(selectionChangeListener);
-
-    // Watch for configuration changes
-    const configChangeListener = vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-      if (e.affectsConfiguration('gitNova.blame')) {
-        this.loadConfiguration();
-        this.createDecorationTypes();
-        if (this.isEnabled && this.activeEditor) {
-          this.updateDecorations(this.activeEditor);
+    // Watch for cursor movement to refresh the status bar blame
+    const selectionChangeListener = vscode.window.onDidChangeTextEditorSelection(
+      (e: vscode.TextEditorSelectionChangeEvent) => {
+        if (e.textEditor === vscode.window.activeTextEditor) {
+          this.debounceStatusBarUpdate(e.textEditor);
         }
       }
-    });
+    );
+    this.disposables.push(selectionChangeListener);
+
+    // Watch for document changes
+    const documentChangeListener = vscode.workspace.onDidChangeTextDocument(
+      (e: vscode.TextDocumentChangeEvent) => {
+        // Invalidate cache for changed document
+        const filePath = e.document.uri.fsPath;
+        this.blameCache.delete(filePath);
+        this.blameFailures.delete(filePath);
+
+        if (this.isEnabled && this.activeEditor?.document === e.document) {
+          this.debounceUpdateDecorations(this.activeEditor);
+        }
+      }
+    );
+    this.disposables.push(documentChangeListener);
+
+    // Watch for configuration changes
+    const configChangeListener = vscode.workspace.onDidChangeConfiguration(
+      (e: vscode.ConfigurationChangeEvent) => {
+        if (e.affectsConfiguration('gitNova.blame')) {
+          this.loadConfiguration();
+          this.createDecorationTypes();
+          if (this.isEnabled && this.activeEditor) {
+            this.updateDecorations(this.activeEditor);
+          }
+          this.debounceStatusBarUpdate(vscode.window.activeTextEditor || null);
+        }
+      }
+    );
     this.disposables.push(configChangeListener);
 
     // Register hover provider for blame details
     this.registerHoverProvider();
+
+    // Status bar blame for the current line
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    this.statusBarItem.name = 'GitNova Blame';
+    this.debounceStatusBarUpdate(vscode.window.activeTextEditor || null);
 
     logger.info('GitBlameService initialized');
   }
@@ -154,14 +174,14 @@ export class GitBlameService {
    */
   private loadConfiguration(): void {
     const config = vscode.workspace.getConfiguration('gitNova.blame');
-    
+
     this.config = {
       format: config.get<string>('format', DEFAULT_DECORATION_CONFIG.format),
-      dateFormat: config.get<'relative' | 'absolute' | 'both'>('dateFormat', 'relative'),
-      showInline: config.get<boolean>('showInline', true),
-      showInGutter: config.get<boolean>('showInGutter', false),
-      highlightRecentCommits: config.get<boolean>('highlightRecentCommits', true),
-      recentCommitDays: config.get<number>('recentCommitDays', 7),
+      dateFormat: config.get<'relative' | 'short' | 'full'>('dateFormat', 'relative'),
+      showInline: config.get<boolean>('enabled', true),
+      showStatusBar: config.get<boolean>('statusBar', true),
+      highlightRecentCommits: config.get<boolean>('highlightRecent', true),
+      recentCommitDays: config.get<number>('recentDays', 7),
     };
   }
 
@@ -171,7 +191,6 @@ export class GitBlameService {
   private createDecorationTypes(): void {
     // Dispose existing
     this.decorationType?.dispose();
-    this.gutterDecorationType?.dispose();
 
     // Inline decoration
     this.decorationType = vscode.window.createTextEditorDecorationType({
@@ -180,12 +199,6 @@ export class GitBlameService {
         fontStyle: 'italic',
         margin: '0 0 0 3em',
       },
-    });
-
-    // Gutter decoration
-    this.gutterDecorationType = vscode.window.createTextEditorDecorationType({
-      gutterIconPath: undefined, // Will be set dynamically
-      gutterIconSize: 'contain',
     });
   }
 
@@ -224,20 +237,26 @@ export class GitBlameService {
 
     // Header with commit info
     markdown.appendMarkdown(`### $(git-commit) ${line.shortCommit}\n\n`);
-    markdown.appendMarkdown(`**${line.summary}**\n\n`);
-    
+    markdown.appendMarkdown(`**${autolinkService.linkifyMarkdown(line.summary)}**\n\n`);
+
     // Author info
     markdown.appendMarkdown(`---\n\n`);
     markdown.appendMarkdown(`$(account) **Author:** ${line.author} <${line.authorEmail}>\n\n`);
     markdown.appendMarkdown(`$(calendar) **Date:** ${line.authorDate.toLocaleString()}\n\n`);
-    
+
     // Actions
     markdown.appendMarkdown(`---\n\n`);
-    markdown.appendMarkdown(`[$(eye) View Commit](command:gitNova.commit.show?${encodeURIComponent(JSON.stringify([line.commit]))})`);
+    markdown.appendMarkdown(
+      `[$(eye) View Commit](command:gitNova.commit.show?${encodeURIComponent(JSON.stringify([line.commit]))})`
+    );
     markdown.appendMarkdown(` | `);
-    markdown.appendMarkdown(`[$(diff) Show Changes](command:gitNova.diff.viewCommit?${encodeURIComponent(JSON.stringify([line.commit]))})`);
+    markdown.appendMarkdown(
+      `[$(diff) Show Changes](command:gitNova.diff.viewCommit?${encodeURIComponent(JSON.stringify([line.commit]))})`
+    );
     markdown.appendMarkdown(` | `);
-    markdown.appendMarkdown(`[$(copy) Copy SHA](command:gitNova.copyCommitSha?${encodeURIComponent(JSON.stringify([line.commit]))})`);
+    markdown.appendMarkdown(
+      `[$(copy) Copy SHA](command:gitNova.copyCommitSha?${encodeURIComponent(JSON.stringify([line.commit]))})`
+    );
 
     return new vscode.Hover(markdown);
   }
@@ -261,9 +280,9 @@ export class GitBlameService {
     try {
       const result = await this.executeGitBlame(filePath);
       const blameInfo = this.parseBlameOutput(filePath, result);
-      
+
       this.blameCache.set(filePath, blameInfo);
-      
+
       return blameInfo;
     } catch (error) {
       logger.error(`Failed to get blame for ${filePath}`, error);
@@ -283,7 +302,6 @@ export class GitBlameService {
     }
 
     return new Promise((resolve, reject) => {
-      const { exec } = require('child_process');
       exec(
         `git blame --porcelain "${filePath}"`,
         { cwd: repoPath, maxBuffer: 50 * 1024 * 1024 },
@@ -304,7 +322,7 @@ export class GitBlameService {
   private parseBlameOutput(filePath: string, output: string): BlameInfo {
     const lines: BlameLine[] = [];
     const commits = new Map<string, BlameCommit>();
-    
+
     const outputLines = output.split('\n');
     let currentCommit = '';
     let currentLine: Partial<BlameLine> = {};
@@ -312,13 +330,13 @@ export class GitBlameService {
 
     for (let i = 0; i < outputLines.length; i++) {
       const line = outputLines[i];
-      
+
       if (/^[a-f0-9]{40}/.test(line)) {
         // Commit line
         const parts = line.split(' ');
         currentCommit = parts[0];
         lineNumber = parseInt(parts[2], 10);
-        
+
         currentLine = {
           commit: currentCommit,
           shortCommit: currentCommit.substring(0, 7),
@@ -342,7 +360,7 @@ export class GitBlameService {
       } else if (line.startsWith('\t')) {
         // Content line
         currentLine.content = line.substring(1);
-        
+
         // Store commit info
         if (!commits.has(currentCommit) && currentLine.author) {
           commits.set(currentCommit, {
@@ -353,12 +371,12 @@ export class GitBlameService {
             summary: currentLine.summary || '',
           });
         }
-        
+
         // Add completed line
         if (currentLine.line && currentLine.author) {
           lines.push(currentLine as BlameLine);
         }
-        
+
         currentLine = {};
       }
     }
@@ -375,12 +393,12 @@ export class GitBlameService {
    */
   enable(): void {
     this.isEnabled = true;
-    
+
     if (vscode.window.activeTextEditor) {
       this.activeEditor = vscode.window.activeTextEditor;
       this.updateDecorations(this.activeEditor);
     }
-    
+
     logger.info('Git blame enabled');
   }
 
@@ -435,35 +453,28 @@ export class GitBlameService {
   }
 
   /**
-   * Update decoration for current line only
-   */
-  private async updateCurrentLineDecoration(editor: vscode.TextEditor): Promise<void> {
-    // This could be optimized to only show blame for the current line
-    // For now, we update all decorations
-  }
-
-  /**
    * Create decoration for a blame line
    */
-  private createLineDecoration(line: BlameLine, document: vscode.TextDocument): vscode.DecorationOptions {
+  private createLineDecoration(
+    line: BlameLine,
+    document: vscode.TextDocument
+  ): vscode.DecorationOptions {
     const textLine = document.lineAt(line.line - 1);
-    const range = new vscode.Range(
-      textLine.range.end,
-      textLine.range.end
-    );
+    const range = new vscode.Range(textLine.range.end, textLine.range.end);
 
     const text = this.formatBlameText(line);
-    
+
     // Check if recent commit
-    const isRecent = this.config.highlightRecentCommits && 
-      (Date.now() - line.authorDate.getTime()) < (this.config.recentCommitDays * 24 * 60 * 60 * 1000);
+    const isRecent =
+      this.config.highlightRecentCommits &&
+      Date.now() - line.authorDate.getTime() < this.config.recentCommitDays * 24 * 60 * 60 * 1000;
 
     return {
       range,
       renderOptions: {
         after: {
           contentText: ` — ${text}`,
-          color: isRecent 
+          color: isRecent
             ? new vscode.ThemeColor('charts.green')
             : new vscode.ThemeColor('editorCodeLens.foreground'),
         },
@@ -476,17 +487,17 @@ export class GitBlameService {
    */
   private formatBlameText(line: BlameLine): string {
     let text = this.config.format;
-    
+
     text = text.replace('{{author}}', line.author);
     text = text.replace('{{email}}', line.authorEmail);
     text = text.replace('{{commit}}', line.shortCommit);
     text = text.replace('{{summary}}', line.summary.substring(0, 50));
-    
+
     // Format date
     let dateStr = '';
     if (this.config.dateFormat === 'relative') {
       dateStr = this.formatRelativeDate(line.authorDate);
-    } else if (this.config.dateFormat === 'absolute') {
+    } else if (this.config.dateFormat === 'short') {
       dateStr = line.authorDate.toLocaleDateString();
     } else {
       dateStr = `${this.formatRelativeDate(line.authorDate)} (${line.authorDate.toLocaleDateString()})`;
@@ -502,7 +513,7 @@ export class GitBlameService {
   private formatRelativeDate(date: Date): string {
     const now = Date.now();
     const diff = now - date.getTime();
-    
+
     const seconds = Math.floor(diff / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -526,10 +537,73 @@ export class GitBlameService {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
-    
+
     this.debounceTimer = setTimeout(() => {
       this.updateDecorations(editor);
     }, 500);
+  }
+
+  /**
+   * Debounced status bar refresh (cursor moves fire rapidly)
+   */
+  private debounceStatusBarUpdate(editor: vscode.TextEditor | null): void {
+    if (this.statusBarDebounceTimer) {
+      clearTimeout(this.statusBarDebounceTimer);
+    }
+
+    this.statusBarDebounceTimer = setTimeout(() => {
+      this.updateStatusBar(editor);
+    }, 300);
+  }
+
+  /**
+   * Show blame for the active editor line in the status bar
+   */
+  private async updateStatusBar(editor: vscode.TextEditor | null): Promise<void> {
+    if (!this.statusBarItem) return;
+
+    if (
+      !this.config.showInline ||
+      !this.config.showStatusBar ||
+      !editor ||
+      editor.document.uri.scheme !== 'file'
+    ) {
+      this.statusBarItem.hide();
+      return;
+    }
+
+    const filePath = editor.document.uri.fsPath;
+    const lineNumber = editor.selection.active.line + 1;
+
+    // Reuse cached blame; fetch at most once per file (failures are remembered)
+    let blameInfo = this.blameCache.get(filePath);
+    if (!blameInfo && !this.blameFailures.has(filePath)) {
+      blameInfo = await this.getBlame(filePath);
+      if (!blameInfo) {
+        this.blameFailures.add(filePath);
+      }
+    }
+
+    const line = blameInfo?.lines.find(l => l.line === lineNumber);
+    if (!line) {
+      this.statusBarItem.hide();
+      return;
+    }
+
+    if (line.isUncommitted) {
+      this.statusBarItem.text = '$(person) Uncommitted changes';
+      this.statusBarItem.tooltip = 'This line has not been committed yet';
+      this.statusBarItem.command = undefined;
+    } else {
+      this.statusBarItem.text = `$(person) ${line.author}, ${this.formatRelativeDate(line.authorDate)}`;
+      this.statusBarItem.tooltip = `${line.summary}\n${line.shortCommit} — click to view commit details`;
+      this.statusBarItem.command = {
+        title: 'View Commit',
+        command: 'gitNova.commit.show',
+        arguments: [line.commit],
+      };
+    }
+    this.statusBarItem.show();
   }
 
   /**
@@ -539,9 +613,6 @@ export class GitBlameService {
     if (this.activeEditor && this.decorationType) {
       this.activeEditor.setDecorations(this.decorationType, []);
     }
-    if (this.activeEditor && this.gutterDecorationType) {
-      this.activeEditor.setDecorations(this.gutterDecorationType, []);
-    }
   }
 
   /**
@@ -549,6 +620,7 @@ export class GitBlameService {
    */
   clearCache(): void {
     this.blameCache.clear();
+    this.blameFailures.clear();
   }
 
   /**
@@ -580,12 +652,8 @@ export class GitBlameService {
     }
 
     const message = `${line.author}, ${this.formatRelativeDate(line.authorDate)}\n${line.summary}`;
-    
-    const action = await vscode.window.showInformationMessage(
-      message,
-      'View Commit',
-      'Copy SHA'
-    );
+
+    const action = await vscode.window.showInformationMessage(message, 'View Commit', 'Copy SHA');
 
     if (action === 'View Commit') {
       await vscode.commands.executeCommand('gitNova.commit.show', line.commit);
@@ -601,15 +669,22 @@ export class GitBlameService {
   dispose(): void {
     this.disable();
     this.decorationType?.dispose();
-    this.gutterDecorationType?.dispose();
     this.hoverProvider?.dispose();
-    
+
+    if (this.statusBarDebounceTimer) {
+      clearTimeout(this.statusBarDebounceTimer);
+      this.statusBarDebounceTimer = null;
+    }
+    this.statusBarItem?.dispose();
+    this.statusBarItem = null;
+
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
     this.disposables = [];
-    
+
     this.blameCache.clear();
+    this.blameFailures.clear();
     logger.info('GitBlameService disposed');
   }
 }

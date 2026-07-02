@@ -1,18 +1,19 @@
 import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
-import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   Branch,
   Commit,
   CommitDetail,
   CommitFile,
   Diff,
+  DiffHunk,
   FileDiff,
   FileHistoryEntry,
   Stash,
   GitStatus,
   StatusFile,
   FileStatus,
-  Author,
   Remote,
 } from '../models';
 import { logger } from '../utils/logger';
@@ -33,12 +34,77 @@ export class GitError extends Error {
 }
 
 /**
+ * State of an in-progress git operation (rebase/merge/cherry-pick)
+ */
+export interface GitOperationState {
+  type: 'rebase' | 'merge' | 'cherry-pick' | null;
+  /** Current step of a rebase (1-based) */
+  step?: number;
+  /** Total steps of a rebase */
+  total?: number;
+}
+
+/**
+ * A commit that an interactive rebase would replay (base..HEAD)
+ */
+export interface RebaseTodoCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  /** Full commit message (subject + body) */
+  message: string;
+  author: string;
+  date: Date;
+}
+
+/**
+ * Node script injected as GIT_SEQUENCE_EDITOR / GIT_EDITOR during a visual
+ * interactive rebase. Invoked as: <node> <script> <mode> <payloadDir> <file>.
+ * 'sequence' mode replaces the todo file with the pre-built one; 'message'
+ * mode pops the next commit message off a queue (reword/squash steps only —
+ * git also opens the editor when continuing a conflicted pick, and that
+ * invocation must keep git's own message instead of consuming the queue).
+ * The current step is the last line of rebase-merge/done.
+ */
+const REBASE_EDITOR_SCRIPT = `
+const fs = require('fs');
+const path = require('path');
+const mode = process.argv[2];
+const dir = process.argv[3];
+const target = process.argv[4];
+if (mode === 'sequence') {
+  fs.copyFileSync(path.join(dir, 'todo.txt'), target);
+} else {
+  let action = '';
+  try {
+    const done = fs
+      .readFileSync(path.join(path.dirname(target), 'rebase-merge', 'done'), 'utf8')
+      .trim()
+      .split('\\n');
+    action = (done[done.length - 1] || '').split(' ')[0];
+  } catch {
+    // no rebase state — leave the message untouched
+  }
+  if (action === 'reword' || action === 'squash' || action === 'fixup') {
+    const queueFile = path.join(dir, 'messages.json');
+    const queue = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
+    if (queue.length > 0) {
+      const message = queue.shift();
+      fs.writeFileSync(queueFile, JSON.stringify(queue));
+      fs.writeFileSync(target, message.endsWith('\\n') ? message : message + '\\n');
+    }
+  }
+}
+`;
+
+/**
  * GitService - Core service for all git operations
  * Wraps simple-git library and provides a clean, typed API
  */
 export class GitService {
   private git: SimpleGit;
   private repositoryPath: string | null = null;
+  private gitDirCache: string | null = null;
 
   constructor(repositoryPath?: string) {
     if (repositoryPath) {
@@ -60,6 +126,7 @@ export class GitService {
     try {
       await this.git.cwd(path).init();
       this.repositoryPath = path;
+      this.gitDirCache = null;
       this.git = simpleGit(path);
       logger.info('Git repository initialized successfully');
     } catch (error) {
@@ -85,6 +152,7 @@ export class GitService {
       const testGit = simpleGit(path);
       await testGit.status();
       this.repositoryPath = path;
+      this.gitDirCache = null;
       this.git = testGit;
       logger.info(`Repository path validated: ${path}`);
     } catch (error) {
@@ -550,6 +618,63 @@ export class GitService {
   }
 
   /**
+   * Continue an ongoing cherry-pick
+   */
+  async continueCherryPick(): Promise<void> {
+    logger.info('Continuing cherry-pick');
+    try {
+      await this.git.raw(['cherry-pick', '--continue']);
+      logger.info('Cherry-pick continued successfully');
+    } catch (error) {
+      logger.error('Failed to continue cherry-pick', error);
+      throw new GitError(
+        `Failed to continue cherry-pick: ${error}`,
+        'cherry-pick',
+        undefined,
+        String(error)
+      );
+    }
+  }
+
+  /**
+   * Skip the current commit during a cherry-pick
+   */
+  async skipCherryPick(): Promise<void> {
+    logger.info('Skipping cherry-pick commit');
+    try {
+      await this.git.raw(['cherry-pick', '--skip']);
+      logger.info('Cherry-pick commit skipped successfully');
+    } catch (error) {
+      logger.error('Failed to skip cherry-pick commit', error);
+      throw new GitError(
+        `Failed to skip cherry-pick commit: ${error}`,
+        'cherry-pick',
+        undefined,
+        String(error)
+      );
+    }
+  }
+
+  /**
+   * Abort an ongoing cherry-pick
+   */
+  async abortCherryPick(): Promise<void> {
+    logger.info('Aborting cherry-pick');
+    try {
+      await this.git.raw(['cherry-pick', '--abort']);
+      logger.info('Cherry-pick aborted successfully');
+    } catch (error) {
+      logger.error('Failed to abort cherry-pick', error);
+      throw new GitError(
+        `Failed to abort cherry-pick: ${error}`,
+        'cherry-pick',
+        undefined,
+        String(error)
+      );
+    }
+  }
+
+  /**
    * Revert a commit
    * @param hash - Commit hash to revert
    */
@@ -829,7 +954,7 @@ export class GitService {
         if (name.includes('HEAD')) {
           continue;
         }
-        
+
         const parts = name.split('/');
         const remoteName = parts[0]; // e.g., "origin"
         const branchName = parts.slice(1).join('/'); // e.g., "main" or "feature/xyz"
@@ -1066,55 +1191,73 @@ export class GitService {
   // ==================== Diff Operations ====================
 
   /**
+   * Parse the hunks out of unified diff text.
+   */
+  private parseHunks(text: string): DiffHunk[] {
+    const lines = text.split('\n');
+    const hunks: any[] = [];
+    let currentHunk: any = null;
+
+    for (const line of lines) {
+      if (line.startsWith('@@')) {
+        if (currentHunk) {
+          hunks.push(currentHunk);
+        }
+        const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+        if (match) {
+          currentHunk = {
+            oldStart: parseInt(match[1], 10),
+            oldLines: match[2] ? parseInt(match[2], 10) : 1,
+            newStart: parseInt(match[3], 10),
+            newLines: match[4] ? parseInt(match[4], 10) : 1,
+            lines: [],
+          };
+        }
+      } else if (currentHunk) {
+        let type: any = 'context';
+        if (line.startsWith('+')) {
+          type = 'added';
+        } else if (line.startsWith('-')) {
+          type = 'removed';
+        }
+        currentHunk.lines.push({
+          type,
+          content: line,
+        });
+      }
+    }
+
+    if (currentHunk) {
+      hunks.push(currentHunk);
+    }
+
+    return hunks;
+  }
+
+  /**
    * Get detailed diff for a file
    * @param filePath - Path to the file
    * @param ref - Optional git reference (defaults to working tree)
+   * @param options.ignoreWhitespace - Pass -w to ignore whitespace changes
    * @returns File diff with line-by-line changes
    */
-  async getFileDiff(filePath: string, ref?: string): Promise<FileDiff> {
+  async getFileDiff(
+    filePath: string,
+    ref?: string,
+    options?: { ignoreWhitespace?: boolean }
+  ): Promise<FileDiff> {
     logger.debug(`Fetching file diff: ${filePath}${ref ? ` (${ref})` : ''}`);
     try {
-      const args = ref ? [ref, '--', filePath] : ['--', filePath];
+      const args: string[] = [];
+      if (options?.ignoreWhitespace) {
+        args.push('-w');
+      }
+      if (ref) {
+        args.push(ref);
+      }
+      args.push('--', filePath);
       const result = await this.git.diff(args);
-
-      const lines = result.split('\n');
-      const hunks: any[] = [];
-      let currentHunk: any = null;
-
-      for (const line of lines) {
-        if (line.startsWith('@@')) {
-          if (currentHunk) {
-            hunks.push(currentHunk);
-          }
-          const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-          if (match) {
-            currentHunk = {
-              oldStart: parseInt(match[1], 10),
-              oldLines: match[2] ? parseInt(match[2], 10) : 1,
-              newStart: parseInt(match[3], 10),
-              newLines: match[4] ? parseInt(match[4], 10) : 1,
-              lines: [],
-            };
-          }
-        } else if (currentHunk) {
-          let type: any = 'context';
-          if (line.startsWith('+')) {
-            type = 'added';
-          } else if (line.startsWith('-')) {
-            type = 'removed';
-          } else if (line.startsWith('@@')) {
-            type = 'header';
-          }
-          currentHunk.lines.push({
-            type,
-            content: line,
-          });
-        }
-      }
-
-      if (currentHunk) {
-        hunks.push(currentHunk);
-      }
+      const hunks = this.parseHunks(result);
 
       const fileDiff: FileDiff = {
         filePath,
@@ -1133,12 +1276,19 @@ export class GitService {
   /**
    * Get all diffs
    * @param ref - Optional git reference
+   * @param options.ignoreWhitespace - Pass -w to ignore whitespace changes
    * @returns Array of file diffs
    */
-  async getDiffs(ref?: string): Promise<FileDiff[]> {
+  async getDiffs(ref?: string, options?: { ignoreWhitespace?: boolean }): Promise<FileDiff[]> {
     logger.debug(`Fetching diffs${ref ? ` for ${ref}` : ''}`);
     try {
-      const args = ref ? [ref] : [];
+      const args: string[] = [];
+      if (options?.ignoreWhitespace) {
+        args.push('-w');
+      }
+      if (ref) {
+        args.push(ref);
+      }
       const result = await this.git.diff(args);
 
       const diffs: FileDiff[] = [];
@@ -1150,23 +1300,12 @@ export class GitService {
         const pathMatch = section.match(/a\/(.*)\s+b\/(.*)/);
         if (pathMatch) {
           const filePath = pathMatch[2];
-          const additions = (section.match(/\n\+/g) || []).length;
-          const deletions = (section.match(/\n-/g) || []).length;
-
-          let status = FileStatus.Modified;
-          if (section.includes('new file')) {
-            status = FileStatus.Added;
-          } else if (section.includes('deleted file')) {
-            status = FileStatus.Deleted;
-          } else if (section.includes('rename')) {
-            status = FileStatus.Renamed;
-          }
 
           diffs.push({
             filePath,
             oldPath: undefined,
-            hunks: [],
-            isBinary: false,
+            hunks: this.parseHunks(section),
+            isBinary: section.includes('Binary files'),
           });
         }
       }
@@ -1181,12 +1320,13 @@ export class GitService {
 
   /**
    * Get staged diffs
+   * @param options.ignoreWhitespace - Pass -w to ignore whitespace changes
    * @returns Array of staged file diffs
    */
-  async getStagedDiffs(): Promise<FileDiff[]> {
+  async getStagedDiffs(options?: { ignoreWhitespace?: boolean }): Promise<FileDiff[]> {
     logger.debug('Fetching staged diffs');
     try {
-      return await this.getDiffs('--staged');
+      return await this.getDiffs('--staged', options);
     } catch (error) {
       logger.error('Failed to fetch staged diffs', error);
       throw new GitError(
@@ -1200,12 +1340,13 @@ export class GitService {
 
   /**
    * Get unstaged diffs
+   * @param options.ignoreWhitespace - Pass -w to ignore whitespace changes
    * @returns Array of unstaged file diffs
    */
-  async getUnstagedDiffs(): Promise<FileDiff[]> {
+  async getUnstagedDiffs(options?: { ignoreWhitespace?: boolean }): Promise<FileDiff[]> {
     logger.debug('Fetching unstaged diffs');
     try {
-      return await this.getDiffs();
+      return await this.getDiffs(undefined, options);
     } catch (error) {
       logger.error('Failed to fetch unstaged diffs', error);
       throw new GitError(
@@ -1368,15 +1509,65 @@ export class GitService {
   }
 
   /**
+   * List the files that differ between two refs (commits or branches),
+   * with per-file addition/deletion counts.
+   * @param from - Base ref (left side of the comparison)
+   * @param to - Target ref (right side of the comparison)
+   * @param options.ignoreWhitespace - Pass -w so whitespace-only changes are excluded
+   * @returns One Diff entry per changed file
+   */
+  async getChangedFilesBetween(
+    from: string,
+    to: string,
+    options?: { ignoreWhitespace?: boolean }
+  ): Promise<Diff[]> {
+    logger.debug(`Fetching changed files: ${from}..${to}`);
+    try {
+      const args: string[] = [];
+      if (options?.ignoreWhitespace) {
+        args.push('-w');
+      }
+      args.push(`${from}..${to}`);
+      const summary = await this.git.diffSummary(args);
+
+      return summary.files.map(file => ({
+        filePath: file.file,
+        oldPath: undefined,
+        status: FileStatus.Modified,
+        additions: 'insertions' in file ? file.insertions : 0,
+        deletions: 'deletions' in file ? file.deletions : 0,
+        isStaged: false,
+      }));
+    } catch (error) {
+      logger.error('Failed to fetch changed files', error);
+      throw new GitError(
+        `Failed to fetch changed files: ${error}`,
+        'diff',
+        undefined,
+        String(error)
+      );
+    }
+  }
+
+  /**
    * Compare two branches
    * @param branch1 - First branch
    * @param branch2 - Second branch
+   * @param options.ignoreWhitespace - Pass -w to ignore whitespace changes
    * @returns Diff between branches
    */
-  async compareBranches(branch1: string, branch2: string): Promise<Diff> {
+  async compareBranches(
+    branch1: string,
+    branch2: string,
+    options?: { ignoreWhitespace?: boolean }
+  ): Promise<Diff> {
     logger.debug(`Comparing branches: ${branch1} vs ${branch2}`);
     try {
-      const result = await this.git.diff([`${branch1}...${branch2}`, '--stat']);
+      const args = [`${branch1}...${branch2}`, '--stat'];
+      if (options?.ignoreWhitespace) {
+        args.push('-w');
+      }
+      const result = await this.git.diff(args);
 
       const match = result.match(
         /(\d+) files? changed, (\d+) insertions?\(\+\), (\d+) deletions?\(-\)/
@@ -1541,6 +1732,89 @@ export class GitService {
     }
   }
 
+  // ==================== In-Progress Operation Detection ====================
+
+  /**
+   * Resolve the actual .git directory (handles worktrees/submodules where
+   * .git is a file containing "gitdir: <path>"). Cached per repository path.
+   */
+  private resolveGitDir(): string | null {
+    if (!this.repositoryPath) {
+      return null;
+    }
+    if (this.gitDirCache) {
+      return this.gitDirCache;
+    }
+    try {
+      const dotGit = path.join(this.repositoryPath, '.git');
+      const stat = fs.statSync(dotGit);
+      if (stat.isDirectory()) {
+        this.gitDirCache = dotGit;
+      } else {
+        const content = fs.readFileSync(dotGit, 'utf8');
+        const match = content.match(/^gitdir:\s*(.+)\s*$/m);
+        if (!match) {
+          return null;
+        }
+        this.gitDirCache = path.resolve(this.repositoryPath, match[1].trim());
+      }
+      return this.gitDirCache;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Read a numeric rebase progress file (msgnum/end/next/last).
+   */
+  private readStepFile(filePath: string): number | undefined {
+    try {
+      const value = parseInt(fs.readFileSync(filePath, 'utf8').trim(), 10);
+      return isNaN(value) ? undefined : value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Detect an in-progress rebase/merge/cherry-pick by inspecting .git state.
+   * Pure filesystem checks (no git exec) — cheap enough for every refresh cycle.
+   */
+  getOperationState(): GitOperationState {
+    const gitDir = this.resolveGitDir();
+    if (!gitDir) {
+      return { type: null };
+    }
+
+    const rebaseMerge = path.join(gitDir, 'rebase-merge');
+    if (fs.existsSync(rebaseMerge)) {
+      return {
+        type: 'rebase',
+        step: this.readStepFile(path.join(rebaseMerge, 'msgnum')),
+        total: this.readStepFile(path.join(rebaseMerge, 'end')),
+      };
+    }
+
+    const rebaseApply = path.join(gitDir, 'rebase-apply');
+    if (fs.existsSync(rebaseApply)) {
+      return {
+        type: 'rebase',
+        step: this.readStepFile(path.join(rebaseApply, 'next')),
+        total: this.readStepFile(path.join(rebaseApply, 'last')),
+      };
+    }
+
+    if (fs.existsSync(path.join(gitDir, 'MERGE_HEAD'))) {
+      return { type: 'merge' };
+    }
+
+    if (fs.existsSync(path.join(gitDir, 'CHERRY_PICK_HEAD'))) {
+      return { type: 'cherry-pick' };
+    }
+
+    return { type: null };
+  }
+
   // ==================== Rebase Operations ====================
 
   /**
@@ -1561,16 +1835,41 @@ export class GitService {
   }
 
   /**
+   * Git instance for resuming a rebase. When a visual interactive rebase is
+   * paused (editor state pending), the injected editor env is re-applied so
+   * git never launches a terminal editor and the remaining reword/squash
+   * messages keep coming from the queue.
+   */
+  private getRebaseResumeGit(): SimpleGit {
+    const pendingDir = this.getPendingRebaseEditorDir();
+    if (pendingDir && this.repositoryPath) {
+      return simpleGit(this.repositoryPath).env(this.buildRebaseEditorEnv(pendingDir));
+    }
+    return this.git;
+  }
+
+  /**
+   * Drop visual rebase editor state once no rebase is in progress anymore
+   */
+  private cleanupRebaseEditorStateIfDone(): void {
+    if (this.getPendingRebaseEditorDir() && this.getOperationState().type !== 'rebase') {
+      this.cleanupRebaseEditorState();
+    }
+  }
+
+  /**
    * Continue an ongoing rebase
    */
   async continueRebase(): Promise<void> {
     logger.info('Continuing rebase');
     try {
-      await this.git.rebase(['--continue']);
+      await this.getRebaseResumeGit().rebase(['--continue']);
       logger.info('Rebase continued successfully');
     } catch (error) {
       logger.error('Failed to continue rebase', error);
       throw new GitError(`Failed to continue rebase: ${error}`, 'rebase', undefined, String(error));
+    } finally {
+      this.cleanupRebaseEditorStateIfDone();
     }
   }
 
@@ -1585,6 +1884,8 @@ export class GitService {
     } catch (error) {
       logger.error('Failed to abort rebase', error);
       throw new GitError(`Failed to abort rebase: ${error}`, 'rebase', undefined, String(error));
+    } finally {
+      this.cleanupRebaseEditorStateIfDone();
     }
   }
 
@@ -1594,7 +1895,7 @@ export class GitService {
   async skipRebaseCommit(): Promise<void> {
     logger.info('Skipping rebase commit');
     try {
-      await this.git.rebase(['--skip']);
+      await this.getRebaseResumeGit().rebase(['--skip']);
       logger.info('Rebase commit skipped successfully');
     } catch (error) {
       logger.error('Failed to skip rebase commit', error);
@@ -1604,6 +1905,8 @@ export class GitService {
         undefined,
         String(error)
       );
+    } finally {
+      this.cleanupRebaseEditorStateIfDone();
     }
   }
 
@@ -1633,8 +1936,7 @@ export class GitService {
   async getRebaseStatus(): Promise<{ inProgress: boolean; currentCommit?: string }> {
     logger.debug('Checking rebase status');
     try {
-      const status = await this.git.status();
-      const inProgress = status.files.some(f => f.path.includes('.git/rebase-'));
+      const inProgress = this.getOperationState().type === 'rebase';
 
       let currentCommit: string | undefined;
       if (inProgress) {
@@ -1651,6 +1953,157 @@ export class GitService {
     } catch (error) {
       logger.error('Failed to get rebase status', error);
       return { inProgress: false };
+    }
+  }
+
+  /**
+   * List the commits that `git rebase -i <base>` would replay (base..HEAD),
+   * oldest first (todo order), with full messages for reword prefills.
+   * Merge commits are skipped, matching interactive rebase defaults.
+   * @param base - Base ref (commit hash, branch, or HEAD~N)
+   */
+  async getRebaseTodoCommits(base: string): Promise<RebaseTodoCommit[]> {
+    logger.debug(`Fetching rebase todo commits: ${base}..HEAD`);
+    const SEP = '\x1f';
+    const EOR = '\x1e';
+    try {
+      const result = await this.git.raw([
+        'log',
+        '--reverse',
+        '--no-merges',
+        `--pretty=format:%H${SEP}%h${SEP}%an${SEP}%aI${SEP}%s${SEP}%B${EOR}`,
+        `${base}..HEAD`,
+      ]);
+
+      const commits: RebaseTodoCommit[] = [];
+      for (const record of result.split(EOR)) {
+        const p = record.replace(/^\n/, '').split(SEP);
+        if (p.length < 6) {
+          continue;
+        }
+        commits.push({
+          hash: p[0],
+          shortHash: p[1],
+          author: p[2],
+          date: new Date(p[3]),
+          subject: p[4],
+          message: p[5].trim(),
+        });
+      }
+      logger.debug(`Fetched ${commits.length} rebase todo commits`);
+      return commits;
+    } catch (error) {
+      logger.error('Failed to fetch rebase todo commits', error);
+      throw new GitError(
+        `Failed to fetch rebase todo commits: ${error}`,
+        'log',
+        undefined,
+        String(error)
+      );
+    }
+  }
+
+  /**
+   * Directory holding the injected editor script and message queue for the
+   * visual interactive rebase. Lives inside .git so it survives a conflict
+   * pause and can be found again by continue/skip.
+   */
+  private getRebaseEditorDir(): string | null {
+    const gitDir = this.resolveGitDir();
+    return gitDir ? path.join(gitDir, 'gitnova-rebase') : null;
+  }
+
+  /**
+   * Editor dir of a paused visual interactive rebase, if one exists
+   */
+  private getPendingRebaseEditorDir(): string | null {
+    const dir = this.getRebaseEditorDir();
+    return dir && fs.existsSync(path.join(dir, 'rebase-editor.js')) ? dir : null;
+  }
+
+  /**
+   * Remove leftover visual rebase editor state (no-op if absent)
+   */
+  private cleanupRebaseEditorState(): void {
+    const dir = this.getRebaseEditorDir();
+    if (!dir) {
+      return;
+    }
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+
+  /**
+   * Environment that routes git's editors through the injected script.
+   * Git runs editors through sh, so quote with forward slashes (Windows-safe).
+   * ELECTRON_RUN_AS_NODE lets the VS Code binary act as plain node.
+   */
+  private buildRebaseEditorEnv(workDir: string): NodeJS.ProcessEnv {
+    const quote = (p: string) => `"${p.replace(/\\/g, '/')}"`;
+    const scriptPath = path.join(workDir, 'rebase-editor.js');
+    const editorCommand = (mode: 'sequence' | 'message') =>
+      `${quote(process.execPath)} ${quote(scriptPath)} ${mode} ${quote(workDir)}`;
+    return {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      GIT_SEQUENCE_EDITOR: editorCommand('sequence'),
+      GIT_EDITOR: editorCommand('message'),
+    };
+  }
+
+  /**
+   * Run `git rebase -i <base>` non-interactively by injecting a pre-built
+   * todo list through GIT_SEQUENCE_EDITOR. Messages for reword/squash steps
+   * are consumed in editor-invocation order from a queue via GIT_EDITOR, so
+   * no terminal editor ever opens. Powers the visual interactive rebase.
+   * On a conflict pause the editor state is kept so continueRebase and
+   * skipRebaseCommit can keep feeding the remaining messages.
+   * @param base - Base ref to rebase onto
+   * @param todoLines - Complete todo list, oldest commit first
+   * @param messages - Commit message queue (one entry per reword/squash stop)
+   * @param autoStash - Pass --autostash to git
+   */
+  async runInteractiveRebase(
+    base: string,
+    todoLines: string[],
+    messages: string[],
+    autoStash = false
+  ): Promise<void> {
+    if (!this.repositoryPath) {
+      throw new GitError('No repository path set', 'rebase');
+    }
+    const workDir = this.getRebaseEditorDir();
+    if (!workDir) {
+      throw new GitError('Unable to resolve .git directory', 'rebase');
+    }
+    logger.info(`Running interactive rebase onto ${base} (${todoLines.length} todo lines)`);
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.mkdirSync(workDir, { recursive: true });
+      fs.writeFileSync(path.join(workDir, 'rebase-editor.js'), REBASE_EDITOR_SCRIPT);
+      fs.writeFileSync(path.join(workDir, 'todo.txt'), todoLines.join('\n') + '\n');
+      fs.writeFileSync(path.join(workDir, 'messages.json'), JSON.stringify(messages));
+
+      const git = simpleGit(this.repositoryPath).env(this.buildRebaseEditorEnv(workDir));
+
+      const args = ['-i'];
+      if (autoStash) {
+        args.push('--autostash');
+      }
+      args.push(base);
+      await git.rebase(args);
+      logger.info('Interactive rebase completed successfully');
+    } catch (error) {
+      logger.error('Interactive rebase failed', error);
+      throw new GitError(`Interactive rebase failed: ${error}`, 'rebase', undefined, String(error));
+    } finally {
+      // Keep the message queue while the rebase is paused on conflicts
+      if (this.getOperationState().type !== 'rebase') {
+        this.cleanupRebaseEditorState();
+      }
     }
   }
 
@@ -1877,11 +2330,19 @@ export class GitService {
    * Get list of tags
    * @returns Array of tags with name, hash, and optional annotation details
    */
-  async getTags(): Promise<{ name: string; hash: string; message?: string; taggerName?: string; taggerDate?: string }[]> {
+  async getTags(): Promise<
+    { name: string; hash: string; message?: string; taggerName?: string; taggerDate?: string }[]
+  > {
     logger.debug('Fetching tags');
     try {
       const result = await this.git.tags();
-      const tags: { name: string; hash: string; message?: string; taggerName?: string; taggerDate?: string }[] = [];
+      const tags: {
+        name: string;
+        hash: string;
+        message?: string;
+        taggerName?: string;
+        taggerDate?: string;
+      }[] = [];
 
       for (const tagName of result.all) {
         try {
@@ -2008,5 +2469,6 @@ export class GitService {
   dispose(): void {
     logger.info('GitService disposing');
     this.repositoryPath = null;
+    this.gitDirCache = null;
   }
 }

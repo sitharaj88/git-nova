@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
+import { autolinkService } from '../services/autolinkService';
 import { logger } from '../utils/logger';
 
 /**
@@ -89,6 +90,9 @@ export class CommitGraphManager {
           date: detail.date.toISOString(),
           message: detail.message,
           body: detail.body || '',
+          // Pre-escaped + autolinked HTML (escape first, then linkify)
+          messageHtml: autolinkService.linkifyHtml(detail.message),
+          bodyHtml: detail.body ? autolinkService.linkifyHtml(detail.body) : '',
           files: detail.files.map(f => ({
             path: f.path,
             status: f.status,
@@ -179,6 +183,8 @@ export class CommitGraphManager {
   .empty, .error { padding: 40px; text-align: center; color: var(--vscode-descriptionForeground); }
   .error { color: var(--vscode-errorForeground); }
   .body { white-space: pre-wrap; font-size: 12px; margin: 8px 0; color: var(--vscode-descriptionForeground); }
+  a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -287,14 +293,14 @@ export class CommitGraphManager {
         '<div class="file"><span>'+esc(f.path)+'</span><span class="st">'+
         '<span class="add">+'+f.additions+'</span> <span class="del">-'+f.deletions+'</span></span></div>').join('');
       el.innerHTML =
-        '<div class="d-title">'+esc(d.message)+'</div>' +
+        '<div class="d-title">'+(d.messageHtml || esc(d.message))+'</div>' +
         '<div class="d-meta">'+esc(d.author)+'<br>'+new Date(d.date).toLocaleString()+'<br><span class="hashc">'+esc(d.hash)+'</span></div>' +
         '<div class="d-actions">' +
           '<button onclick="act(\\'checkout\\')">Checkout</button>' +
           '<button onclick="act(\\'explain\\')">Explain (AI)</button>' +
           '<button onclick="act(\\'copy\\')">Copy SHA</button>' +
         '</div>' +
-        (d.body ? '<div class="body">'+esc(d.body)+'</div>' : '') +
+        (d.body ? '<div class="body">'+(d.bodyHtml || esc(d.body))+'</div>' : '') +
         '<div class="d-title">Files ('+(d.files||[]).length+')</div>' + files;
     }
 

@@ -4,6 +4,8 @@ import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
 import { Commit, CommitFile, FileStatus } from '../models/commit';
 import { CommitCommands } from '../constants/commands';
+import { toRevisionUri } from './revisionContentProvider';
+import { autolinkService } from '../services/autolinkService';
 import { logger } from '../utils/logger';
 
 /**
@@ -54,13 +56,15 @@ class CommitItem extends CommitTreeItem {
     this.tooltip = this.createTooltip();
   }
 
-  private createTooltip(): string {
-    return [
-      `Commit: ${this.commit.hash}`,
-      `Author: ${this.commit.author.name} <${this.commit.author.email}>`,
-      `Date: ${this.commit.date.toISOString()}`,
-      `Message: ${this.commit.message}`,
-    ].join('\n');
+  private createTooltip(): vscode.MarkdownString {
+    const markdown = new vscode.MarkdownString();
+    markdown.appendMarkdown(`**Commit:** ${this.commit.hash}\n\n`);
+    markdown.appendMarkdown(
+      `**Author:** ${this.commit.author.name} <${this.commit.author.email}>\n\n`
+    );
+    markdown.appendMarkdown(`**Date:** ${this.commit.date.toISOString()}\n\n`);
+    markdown.appendMarkdown(`**Message:** ${autolinkService.linkifyMarkdown(this.commit.message)}`);
+    return markdown;
   }
 }
 
@@ -243,22 +247,6 @@ export function registerCommitProvider(
 ): CommitProvider {
   const commitProvider = new CommitProvider(gitService, repositoryManager, eventBus);
 
-  // Content provider that serves a file's content at a specific revision,
-  // backing the native side-by-side diff for commit files.
-  const revisionProvider: vscode.TextDocumentContentProvider = {
-    provideTextDocumentContent: async (uri: vscode.Uri) => {
-      const ref = uri.query;
-      const filePath = uri.path.replace(/^\//, '');
-      if (!ref) {
-        return '';
-      }
-      return gitService.getFileAtRevision(ref, filePath);
-    },
-  };
-  context.subscriptions.push(
-    vscode.workspace.registerTextDocumentContentProvider('gitnova-rev', revisionProvider)
-  );
-
   // Create tree view
   const treeView = vscode.window.createTreeView('gitNova.commits', {
     treeDataProvider: commitProvider,
@@ -376,16 +364,8 @@ function registerCommitContextMenuCommands(
       }
       try {
         const fileName = filePath.split(/[\\/]/).pop() || filePath;
-        const left = vscode.Uri.from({
-          scheme: 'gitnova-rev',
-          path: '/' + filePath,
-          query: `${hash}~1`,
-        });
-        const right = vscode.Uri.from({
-          scheme: 'gitnova-rev',
-          path: '/' + filePath,
-          query: hash,
-        });
+        const left = toRevisionUri(filePath, `${hash}~1`);
+        const right = toRevisionUri(filePath, hash);
         await vscode.commands.executeCommand(
           'vscode.diff',
           left,

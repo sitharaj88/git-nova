@@ -55,7 +55,19 @@ const DEFAULT_TEMPLATES: CommitTemplate[] = [
         key: 'type',
         label: 'Type',
         required: true,
-        options: ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert'],
+        options: [
+          'feat',
+          'fix',
+          'docs',
+          'style',
+          'refactor',
+          'perf',
+          'test',
+          'build',
+          'ci',
+          'chore',
+          'revert',
+        ],
       },
       {
         key: 'subject',
@@ -77,7 +89,19 @@ const DEFAULT_TEMPLATES: CommitTemplate[] = [
         key: 'type',
         label: 'Type',
         required: true,
-        options: ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert'],
+        options: [
+          'feat',
+          'fix',
+          'docs',
+          'style',
+          'refactor',
+          'perf',
+          'test',
+          'build',
+          'ci',
+          'chore',
+          'revert',
+        ],
       },
       {
         key: 'scope',
@@ -107,7 +131,19 @@ const DEFAULT_TEMPLATES: CommitTemplate[] = [
         key: 'type',
         label: 'Type',
         required: true,
-        options: ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert'],
+        options: [
+          'feat',
+          'fix',
+          'docs',
+          'style',
+          'refactor',
+          'perf',
+          'test',
+          'build',
+          'ci',
+          'chore',
+          'revert',
+        ],
       },
       {
         key: 'scope',
@@ -294,7 +330,19 @@ export class CommitTemplateManager {
       maxBodyLineLength: 100,
       requireType: false,
       requireScope: false,
-      allowedTypes: ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert'],
+      allowedTypes: [
+        'feat',
+        'fix',
+        'docs',
+        'style',
+        'refactor',
+        'perf',
+        'test',
+        'build',
+        'ci',
+        'chore',
+        'revert',
+      ],
     };
   }
 
@@ -314,15 +362,17 @@ export class CommitTemplateManager {
   initialize(context: vscode.ExtensionContext): void {
     this.loadConfiguration();
     this.loadCustomTemplates(context);
-    
+
     // Watch for configuration changes
-    const configWatcher = vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-      if (e.affectsConfiguration('gitNova.commitMessage')) {
-        this.loadConfiguration();
+    const configWatcher = vscode.workspace.onDidChangeConfiguration(
+      (e: vscode.ConfigurationChangeEvent) => {
+        if (e.affectsConfiguration('gitNova.commitMessage')) {
+          this.loadConfiguration();
+        }
       }
-    });
+    );
     this.disposables.push(configWatcher);
-    
+
     logger.info('CommitTemplateManager initialized');
   }
 
@@ -331,13 +381,28 @@ export class CommitTemplateManager {
    */
   private loadConfiguration(): void {
     const config = vscode.workspace.getConfiguration('gitNova');
-    
+
     this.validationOptions = {
       maxSubjectLength: config.get<number>('commitMessage.maxSubjectLength', 72),
       maxBodyLineLength: config.get<number>('commitMessage.maxBodyLineLength', 100),
       requireType: config.get<boolean>('commitMessage.requireType', false),
       requireScope: config.get<boolean>('commitMessage.requireScope', false),
-      allowedTypes: config.get<string[]>('commitMessage.allowedTypes', DEFAULT_TEMPLATES[0].placeholders?.[0]?.options ?? ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert']),
+      allowedTypes: config.get<string[]>(
+        'commitMessage.allowedTypes',
+        DEFAULT_TEMPLATES[0].placeholders?.[0]?.options ?? [
+          'feat',
+          'fix',
+          'docs',
+          'style',
+          'refactor',
+          'perf',
+          'test',
+          'build',
+          'ci',
+          'chore',
+          'revert',
+        ]
+      ),
     };
   }
 
@@ -362,14 +427,14 @@ export class CommitTemplateManager {
    */
   getTemplatesByCategory(): Map<string, CommitTemplate[]> {
     const byCategory = new Map<string, CommitTemplate[]>();
-    
+
     for (const template of this.templates) {
       const category = template.category || 'Other';
       const templates = byCategory.get(category) || [];
       templates.push(template);
       byCategory.set(category, templates);
     }
-    
+
     return byCategory;
   }
 
@@ -390,17 +455,20 @@ export class CommitTemplateManager {
   /**
    * Add custom template
    */
-  async addCustomTemplate(template: CommitTemplate, context: vscode.ExtensionContext): Promise<void> {
+  async addCustomTemplate(
+    template: CommitTemplate,
+    context: vscode.ExtensionContext
+  ): Promise<void> {
     // Remove if exists
     this.customTemplates = this.customTemplates.filter(t => t.id !== template.id);
     this.customTemplates.push(template);
-    
+
     // Save to storage
     await context.globalState.update('customCommitTemplates', this.customTemplates);
-    
+
     // Rebuild templates list
     this.templates = [...DEFAULT_TEMPLATES, ...this.customTemplates];
-    
+
     logger.info(`Custom commit template added: ${template.name}`);
   }
 
@@ -411,7 +479,7 @@ export class CommitTemplateManager {
     this.customTemplates = this.customTemplates.filter(t => t.id !== id);
     await context.globalState.update('customCommitTemplates', this.customTemplates);
     this.templates = [...DEFAULT_TEMPLATES, ...this.customTemplates];
-    
+
     logger.info(`Custom commit template removed: ${id}`);
   }
 
@@ -420,7 +488,7 @@ export class CommitTemplateManager {
    */
   fillTemplate(template: CommitTemplate, values: Record<string, string>): string {
     let result = template.template;
-    
+
     for (const [key, value] of Object.entries(values)) {
       // Skip empty optional values
       const placeholder = template.placeholders?.find(p => p.key === key);
@@ -431,13 +499,13 @@ export class CommitTemplateManager {
         result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
       }
     }
-    
+
     // Clean up empty lines and parentheses
     result = result
       .replace(/\(\)/g, '') // Remove empty parentheses
       .replace(/\n{3,}/g, '\n\n') // Reduce multiple newlines
       .trim();
-    
+
     return result;
   }
 
@@ -458,7 +526,7 @@ export class CommitTemplateManager {
    */
   parseMessage(message: string): ParsedCommitMessage {
     const parsed = GitValidation.parseConventionalCommit(message);
-    
+
     if (parsed) {
       // Extract issue references
       const issuePattern = /#(\d+)/g;
@@ -467,7 +535,7 @@ export class CommitTemplateManager {
       while ((match = issuePattern.exec(message)) !== null) {
         issues.push(match[1]);
       }
-      
+
       return {
         type: parsed.type,
         scope: parsed.scope,
@@ -478,7 +546,7 @@ export class CommitTemplateManager {
         issues: issues.length > 0 ? issues : undefined,
       };
     }
-    
+
     // Non-conventional commit
     const lines = message.split('\n');
     return {
@@ -494,13 +562,13 @@ export class CommitTemplateManager {
   async showTemplatePicker(): Promise<CommitTemplate | undefined> {
     const byCategory = this.getTemplatesByCategory();
     const items: vscode.QuickPickItem[] = [];
-    
+
     for (const [category, templates] of byCategory) {
       items.push({
         label: category,
         kind: vscode.QuickPickItemKind.Separator,
       });
-      
+
       for (const template of templates) {
         items.push({
           label: template.name,
@@ -509,16 +577,16 @@ export class CommitTemplateManager {
         });
       }
     }
-    
+
     const selected = await vscode.window.showQuickPick(items, {
       placeHolder: 'Select a commit message template',
       title: 'Commit Templates',
     });
-    
+
     if (selected && selected.kind !== vscode.QuickPickItemKind.Separator) {
       return this.templates.find(t => t.name === selected.label);
     }
-    
+
     return undefined;
   }
 
@@ -527,14 +595,14 @@ export class CommitTemplateManager {
    */
   async showTemplateFillDialog(template: CommitTemplate): Promise<string | undefined> {
     const values: Record<string, string> = {};
-    
+
     if (!template.placeholders || template.placeholders.length === 0) {
       return template.template;
     }
-    
+
     for (const placeholder of template.placeholders) {
       let value: string | undefined;
-      
+
       if (placeholder.options && placeholder.options.length > 0) {
         // Show quick pick for options
         value = await vscode.window.showQuickPick(placeholder.options, {
@@ -565,15 +633,15 @@ export class CommitTemplateManager {
           },
         });
       }
-      
+
       // User cancelled
       if (value === undefined && placeholder.required) {
         return undefined;
       }
-      
+
       values[placeholder.key] = value || '';
     }
-    
+
     return this.fillTemplate(template, values);
   }
 
@@ -582,7 +650,7 @@ export class CommitTemplateManager {
    */
   async createCommitMessageWizard(): Promise<string | undefined> {
     const template = await this.showTemplatePicker();
-    
+
     if (!template) {
       // User cancelled or wants freeform
       return await vscode.window.showInputBox({
@@ -594,7 +662,7 @@ export class CommitTemplateManager {
         },
       });
     }
-    
+
     return await this.showTemplateFillDialog(template);
   }
 
@@ -609,24 +677,24 @@ export class CommitTemplateManager {
     issues?: string[];
   }): string {
     const { type = 'feat', scope, description, breaking, issues } = context;
-    
+
     let message = type;
-    
+
     if (scope) {
       message += `(${scope})`;
     }
-    
+
     if (breaking) {
       message += '!';
     }
-    
+
     message += `: ${description}`;
-    
+
     if (issues && issues.length > 0) {
       message += '\n\n';
       message += issues.map(i => `Fixes #${i}`).join('\n');
     }
-    
+
     return message;
   }
 

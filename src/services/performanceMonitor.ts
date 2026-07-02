@@ -68,7 +68,7 @@ const DEFAULT_THRESHOLDS: Record<string, PerformanceThresholds> = {
   'git.branches': { warningMs: 300, criticalMs: 1000 },
   'git.log': { warningMs: 500, criticalMs: 2000 },
   'tree.refresh': { warningMs: 200, criticalMs: 500 },
-  'default': { warningMs: 1000, criticalMs: 5000 },
+  default: { warningMs: 1000, criticalMs: 5000 },
 };
 
 /**
@@ -103,13 +103,10 @@ export class PerformanceMonitor {
    */
   initialize(context: vscode.ExtensionContext): void {
     // Create status bar item for slow operation warnings
-    this.statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Right,
-      50
-    );
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
     this.statusBarItem.name = 'GitNova Performance';
     context.subscriptions.push(this.statusBarItem);
-    
+
     logger.info('PerformanceMonitor initialized');
   }
 
@@ -140,47 +137,52 @@ export class PerformanceMonitor {
    * Start timing an operation
    */
   startOperation(operationName: string, operationId?: string): string {
-    const id = operationId || `${operationName}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    
+    const id =
+      operationId || `${operationName}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
     this.activeOperations.set(id, {
       startTime: performance.now(),
       name: operationName,
     });
-    
+
     logger.trace(`Performance: Started ${operationName}`, { operationId: id });
-    
+
     return id;
   }
 
   /**
    * End timing an operation
    */
-  endOperation(operationId: string, success: boolean = true, tags?: Record<string, string>): number {
+  endOperation(
+    operationId: string,
+    success: boolean = true,
+    tags?: Record<string, string>
+  ): number {
     const operation = this.activeOperations.get(operationId);
-    
+
     if (!operation) {
       logger.warn(`Performance: Unknown operation ID: ${operationId}`);
       return 0;
     }
-    
+
     this.activeOperations.delete(operationId);
-    
+
     const duration = performance.now() - operation.startTime;
-    
+
     this.recordMetric(operation.name, MetricType.Duration, duration, {
       success: String(success),
       ...tags,
     });
-    
+
     // Check thresholds
     this.checkThreshold(operation.name, duration);
-    
+
     logger.trace(`Performance: Completed ${operation.name}`, {
       operationId,
       durationMs: duration.toFixed(2),
       success,
     });
-    
+
     return duration;
   }
 
@@ -194,7 +196,7 @@ export class PerformanceMonitor {
   ): Promise<T> {
     const id = this.startOperation(operationName);
     let success = true;
-    
+
     try {
       return await operation();
     } catch (error) {
@@ -208,14 +210,10 @@ export class PerformanceMonitor {
   /**
    * Measure a sync operation
    */
-  measureSync<T>(
-    operationName: string,
-    operation: () => T,
-    tags?: Record<string, string>
-  ): T {
+  measureSync<T>(operationName: string, operation: () => T, tags?: Record<string, string>): T {
     const id = this.startOperation(operationName);
     let success = true;
-    
+
     try {
       return operation();
     } catch (error) {
@@ -232,7 +230,7 @@ export class PerformanceMonitor {
   createTimer(operationName: string): vscode.Disposable & { getDuration: () => number } {
     const id = this.startOperation(operationName);
     const start = performance.now();
-    
+
     return {
       getDuration: () => performance.now() - start,
       dispose: () => {
@@ -252,14 +250,14 @@ export class PerformanceMonitor {
       timestamp: new Date(),
       tags,
     };
-    
+
     this.metrics.push(entry);
-    
+
     // Trim old metrics
     if (this.metrics.length > this.MAX_METRICS) {
       this.metrics = this.metrics.slice(-this.MAX_METRICS);
     }
-    
+
     // Log performance metrics for telemetry
     logger.recordMetric(name, value, true, tags);
   }
@@ -283,13 +281,17 @@ export class PerformanceMonitor {
    */
   private checkThreshold(operationName: string, durationMs: number): void {
     const threshold = this.getThreshold(operationName);
-    
+
     if (durationMs >= threshold.criticalMs) {
       this.showSlowOperationWarning(operationName, durationMs, 'critical');
-      telemetryService.trackEvent(telemetryService.constructor.prototype.TelemetryEventType?.SlowOperation, {
-        operation: operationName,
-        severity: 'critical',
-      }, { durationMs });
+      telemetryService.trackEvent(
+        telemetryService.constructor.prototype.TelemetryEventType?.SlowOperation,
+        {
+          operation: operationName,
+          severity: 'critical',
+        },
+        { durationMs }
+      );
     } else if (durationMs >= threshold.warningMs) {
       this.showSlowOperationWarning(operationName, durationMs, 'warning');
     }
@@ -304,19 +306,20 @@ export class PerformanceMonitor {
     severity: 'warning' | 'critical'
   ): void {
     if (!this.statusBarItem) return;
-    
+
     const icon = severity === 'critical' ? '$(warning)' : '$(clock)';
-    const color = severity === 'critical' 
-      ? new vscode.ThemeColor('statusBarItem.errorForeground')
-      : new vscode.ThemeColor('statusBarItem.warningForeground');
-    
+    const color =
+      severity === 'critical'
+        ? new vscode.ThemeColor('statusBarItem.errorForeground')
+        : new vscode.ThemeColor('statusBarItem.warningForeground');
+
     this.statusBarItem.text = `${icon} ${operationName}: ${Math.round(durationMs)}ms`;
     this.statusBarItem.tooltip = `GitNova: Slow operation detected\n${operationName} took ${durationMs.toFixed(2)}ms`;
     this.statusBarItem.color = color;
     this.statusBarItem.show();
-    
+
     this.lastSlowOperation = operationName;
-    
+
     // Hide after 5 seconds
     setTimeout(() => {
       if (this.lastSlowOperation === operationName) {
@@ -324,7 +327,7 @@ export class PerformanceMonitor {
         this.lastSlowOperation = null;
       }
     }, 5000);
-    
+
     logger.warn(`Slow operation detected: ${operationName} took ${durationMs.toFixed(2)}ms`);
   }
 
@@ -339,10 +342,10 @@ export class PerformanceMonitor {
       size: 0,
       evictions: 0,
     };
-    
+
     stats.hits++;
     stats.hitRate = stats.hits / (stats.hits + stats.misses);
-    
+
     this.cacheStats.set(cacheName, stats);
     this.incrementCounter(`cache.${cacheName}.hit`);
   }
@@ -358,10 +361,10 @@ export class PerformanceMonitor {
       size: 0,
       evictions: 0,
     };
-    
+
     stats.misses++;
     stats.hitRate = stats.hits / (stats.hits + stats.misses);
-    
+
     this.cacheStats.set(cacheName, stats);
     this.incrementCounter(`cache.${cacheName}.miss`);
   }
@@ -377,7 +380,7 @@ export class PerformanceMonitor {
       size: 0,
       evictions: 0,
     };
-    
+
     stats.size = size;
     this.cacheStats.set(cacheName, stats);
     this.setGauge(`cache.${cacheName}.size`, size);
@@ -394,7 +397,7 @@ export class PerformanceMonitor {
       size: 0,
       evictions: 0,
     };
-    
+
     stats.evictions++;
     this.cacheStats.set(cacheName, stats);
     this.incrementCounter(`cache.${cacheName}.eviction`);
@@ -415,19 +418,19 @@ export class PerformanceMonitor {
    */
   getMetricStats(metricName: string, timeRangeMs?: number): MetricStats | null {
     let entries = this.metrics.filter(m => m.name === metricName && m.type === MetricType.Duration);
-    
+
     if (timeRangeMs) {
       const cutoff = Date.now() - timeRangeMs;
       entries = entries.filter(m => m.timestamp.getTime() >= cutoff);
     }
-    
+
     if (entries.length === 0) {
       return null;
     }
-    
+
     const values = entries.map(m => m.value).sort((a, b) => a - b);
     const sum = values.reduce((acc, v) => acc + v, 0);
-    
+
     return {
       count: values.length,
       min: values[0],
@@ -481,11 +484,11 @@ export class PerformanceMonitor {
   generateReport(): Record<string, unknown> {
     const metricNames = this.getMetricNames();
     const stats: Record<string, MetricStats | null> = {};
-    
+
     for (const name of metricNames) {
       stats[name] = this.getMetricStats(name);
     }
-    
+
     return {
       timestamp: new Date().toISOString(),
       uptime: logger.getUptime(),
@@ -500,10 +503,14 @@ export class PerformanceMonitor {
    * Export metrics as JSON
    */
   exportMetrics(): string {
-    return JSON.stringify({
-      report: this.generateReport(),
-      metrics: this.metrics,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        report: this.generateReport(),
+        metrics: this.metrics,
+      },
+      null,
+      2
+    );
   }
 
   /**

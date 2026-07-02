@@ -8,31 +8,31 @@ export enum StateKey {
   // Repository state
   LastActiveRepository = 'lastActiveRepository',
   RecentRepositories = 'recentRepositories',
-  
+
   // Branch state
   RecentBranches = 'recentBranches',
   FavoriteBranches = 'favoriteBranches',
   BranchFilters = 'branchFilters',
-  
+
   // Commit state
   CommitMessageDraft = 'commitMessageDraft',
   CommitMessageHistory = 'commitMessageHistory',
   CommitFilters = 'commitFilters',
-  
+
   // UI state
   CollapsedTreeItems = 'collapsedTreeItems',
   LastViewState = 'lastViewState',
   DiffViewSettings = 'diffViewSettings',
-  
+
   // User preferences
   PreferredRemote = 'preferredRemote',
   DefaultMergeStrategy = 'defaultMergeStrategy',
   LastUsedCommitTemplate = 'lastUsedCommitTemplate',
-  
+
   // Session state
   SessionHistory = 'sessionHistory',
   UndoStack = 'undoStack',
-  
+
   // Statistics
   OperationStats = 'operationStats',
   ErrorStats = 'errorStats',
@@ -197,10 +197,10 @@ export class WorkspaceStateManager {
    */
   async addRecentRepository(path: string, name: string, branch?: string): Promise<void> {
     const recent = this.getGlobal<RecentRepository[]>(StateKey.RecentRepositories, []);
-    
+
     // Remove if already exists
     const filtered = recent.filter(r => r.path !== path);
-    
+
     // Add to front
     filtered.unshift({
       path,
@@ -208,10 +208,10 @@ export class WorkspaceStateManager {
       lastAccessed: Date.now(),
       branch,
     });
-    
+
     // Trim to max size
     const trimmed = filtered.slice(0, this.MAX_RECENT_REPOS);
-    
+
     await this.setGlobal(StateKey.RecentRepositories, trimmed);
   }
 
@@ -243,16 +243,16 @@ export class WorkspaceStateManager {
    */
   async addRecentBranch(branchName: string): Promise<void> {
     const recent = this.get<string[]>(StateKey.RecentBranches, []);
-    
+
     // Remove if already exists
     const filtered = recent.filter(b => b !== branchName);
-    
+
     // Add to front
     filtered.unshift(branchName);
-    
+
     // Trim to max size
     const trimmed = filtered.slice(0, this.MAX_RECENT_BRANCHES);
-    
+
     await this.set(StateKey.RecentBranches, trimmed);
   }
 
@@ -268,7 +268,7 @@ export class WorkspaceStateManager {
    */
   async addFavoriteBranch(branchName: string): Promise<void> {
     const favorites = this.get<string[]>(StateKey.FavoriteBranches, []);
-    
+
     if (!favorites.includes(branchName)) {
       favorites.push(branchName);
       await this.set(StateKey.FavoriteBranches, favorites);
@@ -327,22 +327,22 @@ export class WorkspaceStateManager {
    */
   async addCommitToHistory(message: string, repository?: string): Promise<void> {
     const history = this.getGlobal<CommitMessageEntry[]>(StateKey.CommitMessageHistory, []);
-    
+
     // Don't add duplicates
     if (history.length > 0 && history[0].message === message) {
       return;
     }
-    
+
     // Add to front
     history.unshift({
       message,
       timestamp: Date.now(),
       repository,
     });
-    
+
     // Trim to max size
     const trimmed = history.slice(0, this.MAX_COMMIT_HISTORY);
-    
+
     await this.setGlobal(StateKey.CommitMessageHistory, trimmed);
   }
 
@@ -359,9 +359,7 @@ export class WorkspaceStateManager {
   searchCommitHistory(query: string): CommitMessageEntry[] {
     const history = this.getCommitHistory();
     const lowerQuery = query.toLowerCase();
-    return history.filter(entry => 
-      entry.message.toLowerCase().includes(lowerQuery)
-    );
+    return history.filter(entry => entry.message.toLowerCase().includes(lowerQuery));
   }
 
   // ==================== UI State ====================
@@ -402,10 +400,14 @@ export class WorkspaceStateManager {
   /**
    * Push an operation to the undo stack
    */
-  async pushUndo(operation: string, data: Record<string, unknown>, canUndo: boolean = true): Promise<string> {
+  async pushUndo(
+    operation: string,
+    data: Record<string, unknown>,
+    canUndo: boolean = true
+  ): Promise<string> {
     const id = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const stack = this.get<UndoEntry[]>(StateKey.UndoStack, []);
-    
+
     stack.push({
       id,
       operation,
@@ -413,12 +415,12 @@ export class WorkspaceStateManager {
       data,
       canUndo,
     });
-    
+
     // Trim to max size
     const trimmed = stack.slice(-this.MAX_UNDO_STACK);
-    
+
     await this.set(StateKey.UndoStack, trimmed);
-    
+
     return id;
   }
 
@@ -427,14 +429,14 @@ export class WorkspaceStateManager {
    */
   async popUndo(): Promise<UndoEntry | undefined> {
     const stack = this.get<UndoEntry[]>(StateKey.UndoStack, []);
-    
+
     if (stack.length === 0) {
       return undefined;
     }
-    
+
     const entry = stack.pop();
     await this.set(StateKey.UndoStack, stack);
-    
+
     return entry;
   }
 
@@ -468,18 +470,18 @@ export class WorkspaceStateManager {
   async startSession(): Promise<string> {
     const id = logger.getSessionId();
     const history = this.getGlobal<SessionEntry[]>(StateKey.SessionHistory, []);
-    
+
     history.push({
       id,
       startTime: Date.now(),
       operations: 0,
       errors: 0,
     });
-    
+
     // Keep last 100 sessions
     const trimmed = history.slice(-100);
     await this.setGlobal(StateKey.SessionHistory, trimmed);
-    
+
     return id;
   }
 
@@ -489,7 +491,7 @@ export class WorkspaceStateManager {
   async endSession(operations: number, errors: number): Promise<void> {
     const history = this.getGlobal<SessionEntry[]>(StateKey.SessionHistory, []);
     const sessionId = logger.getSessionId();
-    
+
     const session = history.find(s => s.id === sessionId);
     if (session) {
       session.endTime = Date.now();
@@ -513,12 +515,12 @@ export class WorkspaceStateManager {
    */
   async exportState(): Promise<Record<string, unknown>> {
     const state: Record<string, unknown> = {};
-    
+
     for (const key of Object.values(StateKey)) {
       state[`workspace:${key}`] = this.get(key as StateKey, null);
       state[`global:${key}`] = this.getGlobal(key as StateKey, null);
     }
-    
+
     return state;
   }
 
@@ -527,11 +529,11 @@ export class WorkspaceStateManager {
    */
   async clearWorkspaceState(): Promise<void> {
     if (!this.context) return;
-    
+
     for (const key of Object.values(StateKey)) {
       await this.context.workspaceState.update(key, undefined);
     }
-    
+
     logger.info('Workspace state cleared');
   }
 
@@ -540,11 +542,11 @@ export class WorkspaceStateManager {
    */
   async clearGlobalState(): Promise<void> {
     if (!this.context) return;
-    
+
     for (const key of Object.values(StateKey)) {
       await this.context.globalState.update(key, undefined);
     }
-    
+
     logger.info('Global state cleared');
   }
 

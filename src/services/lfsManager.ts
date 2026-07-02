@@ -1,6 +1,6 @@
 /**
  * LfsManager - Enterprise Git LFS (Large File Storage) Management
- * 
+ *
  * Provides comprehensive support for Git LFS operations including
  * installation, tracking, file management, and storage optimization.
  */
@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execSync, spawn } from 'child_process';
 import { logger } from '../utils/logger';
 
 /**
@@ -65,10 +66,7 @@ class LfsManagerClass {
 
   private async initialize(): Promise<void> {
     // Create status bar item
-    this._statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      94
-    );
+    this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 94);
     this._statusBarItem.name = 'GitNova LFS';
     this._disposables.push(this._statusBarItem);
 
@@ -83,9 +81,8 @@ class LfsManagerClass {
    */
   public async checkLfsInstallation(): Promise<boolean> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync('git lfs version', { encoding: 'utf-8' });
-      
+
       const versionMatch = result.match(/git-lfs\/(\d+\.\d+\.\d+)/);
       if (versionMatch) {
         this._lfsVersion = versionMatch[1];
@@ -93,7 +90,7 @@ class LfsManagerClass {
         logger.info(`Git LFS version ${this._lfsVersion} detected`);
         return true;
       }
-      
+
       this._lfsInstalled = true;
       return true;
     } catch {
@@ -149,10 +146,9 @@ class LfsManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Installing Git LFS...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
           execSync('git lfs install', { cwd: repoPath });
           logger.info('Git LFS installed in repository');
         }
@@ -199,12 +195,12 @@ class LfsManagerClass {
           { label: '*.dll', description: 'Windows libraries' },
           { label: '*.so', description: 'Linux libraries' },
           { label: '*.dylib', description: 'macOS libraries' },
-          { label: 'Custom...', description: 'Enter a custom pattern' }
+          { label: 'Custom...', description: 'Enter a custom pattern' },
         ];
 
         const selected = await vscode.window.showQuickPick(commonPatterns, {
           placeHolder: 'Select file patterns to track with LFS',
-          canPickMany: true
+          canPickMany: true,
         });
 
         if (!selected || selected.length === 0) {
@@ -216,7 +212,7 @@ class LfsManagerClass {
           if (item.label === 'Custom...') {
             const custom = await vscode.window.showInputBox({
               prompt: 'Enter custom file pattern',
-              placeHolder: '*.extension'
+              placeHolder: '*.extension',
             });
             if (custom) {
               patternsToTrack.push(custom);
@@ -235,11 +231,9 @@ class LfsManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Tracking files with LFS...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           for (const pattern of patternsToTrack!) {
             execSync(`git lfs track "${pattern}"`, { cwd: repoPath });
             logger.info(`LFS tracking: ${pattern}`);
@@ -271,7 +265,7 @@ class LfsManagerClass {
       if (!patternsToUntrack || patternsToUntrack.length === 0) {
         // Get currently tracked patterns
         const tracked = await this.getTrackedPatterns(repoPath);
-        
+
         if (tracked.length === 0) {
           vscode.window.showInformationMessage('No patterns are currently tracked with LFS');
           return;
@@ -281,7 +275,7 @@ class LfsManagerClass {
           tracked.map(p => ({ label: p.pattern, description: 'LFS tracked' })),
           {
             placeHolder: 'Select patterns to untrack',
-            canPickMany: true
+            canPickMany: true,
           }
         );
 
@@ -296,11 +290,9 @@ class LfsManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Untracking files from LFS...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
-          const { execSync } = require('child_process');
-          
           for (const pattern of patternsToUntrack!) {
             execSync(`git lfs untrack "${pattern}"`, { cwd: repoPath });
             logger.info(`LFS untracked: ${pattern}`);
@@ -322,10 +314,9 @@ class LfsManagerClass {
    */
   public async getTrackedPatterns(repoPath: string): Promise<LfsPattern[]> {
     try {
-      const { execSync } = require('child_process');
       const result = execSync('git lfs track', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
       const patterns: LfsPattern[] = [];
@@ -338,7 +329,7 @@ class LfsManagerClass {
             pattern: match[1],
             filter: 'lfs',
             diff: 'lfs',
-            merge: 'lfs'
+            merge: 'lfs',
           });
         }
       }
@@ -353,7 +344,10 @@ class LfsManagerClass {
   /**
    * Pull LFS objects
    */
-  public async pull(repoPath: string, options?: { include?: string[]; exclude?: string[] }): Promise<void> {
+  public async pull(
+    repoPath: string,
+    options?: { include?: string[]; exclude?: string[] }
+  ): Promise<void> {
     if (!this._lfsInstalled) {
       vscode.window.showWarningMessage('Git LFS is not installed');
       return;
@@ -364,14 +358,12 @@ class LfsManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Pulling LFS objects...',
-          cancellable: true
+          cancellable: true,
         },
         async (progress, token) => {
-          const { spawn } = require('child_process');
-          
           return new Promise<void>((resolve, reject) => {
             const args = ['lfs', 'pull'];
-            
+
             if (options?.include && options.include.length > 0) {
               args.push('-I', options.include.join(','));
             }
@@ -380,24 +372,23 @@ class LfsManagerClass {
             }
 
             const proc = spawn('git', args, { cwd: repoPath });
-            
+
             let totalObjects = 0;
             let downloadedObjects = 0;
 
             proc.stderr.on('data', (data: Buffer) => {
               const text = data.toString();
-              
+
               // Parse progress from LFS output
               const progressMatch = text.match(/(\d+) of (\d+) files/);
               if (progressMatch) {
                 downloadedObjects = parseInt(progressMatch[1]);
                 totalObjects = parseInt(progressMatch[2]);
-                const percentage = totalObjects > 0 
-                  ? Math.round((downloadedObjects / totalObjects) * 100)
-                  : 0;
+                const percentage =
+                  totalObjects > 0 ? Math.round((downloadedObjects / totalObjects) * 100) : 0;
                 progress.report({
                   message: `${downloadedObjects}/${totalObjects} files`,
-                  increment: percentage
+                  increment: percentage,
                 });
               }
             });
@@ -435,19 +426,20 @@ class LfsManagerClass {
   /**
    * Prune LFS objects
    */
-  public async prune(repoPath: string, options?: { dryRun?: boolean; verify?: boolean }): Promise<void> {
+  public async prune(
+    repoPath: string,
+    options?: { dryRun?: boolean; verify?: boolean }
+  ): Promise<void> {
     if (!this._lfsInstalled) {
       vscode.window.showWarningMessage('Git LFS is not installed');
       return;
     }
 
     try {
-      const { execSync } = require('child_process');
-
       if (options?.dryRun) {
         const result = execSync('git lfs prune --dry-run', {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
 
         const prunableMatch = result.match(/(\d+) files? would be pruned \((\d+\.?\d*\s*\w+)\)/);
@@ -468,7 +460,7 @@ class LfsManagerClass {
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Pruning LFS objects...',
-          cancellable: false
+          cancellable: false,
         },
         async () => {
           let command = 'git lfs prune';
@@ -497,16 +489,14 @@ class LfsManagerClass {
     }
 
     try {
-      const { execSync } = require('child_process');
-      
       // Get list of LFS objects
       const lsResult = execSync('git lfs ls-files -s', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
 
       const lines = lsResult.split('\n').filter((l: string) => l.trim());
-      
+
       let totalSize = 0;
       let downloadedSize = 0;
       let downloadedCount = 0;
@@ -518,7 +508,7 @@ class LfsManagerClass {
         if (match) {
           const size = parseInt(match[3]);
           const downloaded = match[2] === '*';
-          
+
           totalSize += size;
           if (downloaded) {
             downloadedSize += size;
@@ -535,7 +525,7 @@ class LfsManagerClass {
         downloadedObjects: downloadedCount,
         downloadedSize,
         pendingObjects: pendingCount,
-        pendingSize: totalSize - downloadedSize
+        pendingSize: totalSize - downloadedSize,
       };
     } catch (error) {
       logger.debug('Failed to get LFS stats', error);
@@ -615,42 +605,42 @@ class LfsManagerClass {
     const items: vscode.QuickPickItem[] = [
       {
         label: '$(info) LFS Status',
-        kind: vscode.QuickPickItemKind.Separator
-      }
+        kind: vscode.QuickPickItemKind.Separator,
+      },
     ];
 
     if (stats) {
       items.push({
         label: `Total Objects: ${stats.totalObjects}`,
-        description: this.formatSize(stats.totalSize)
+        description: this.formatSize(stats.totalSize),
       });
       items.push({
         label: `Downloaded: ${stats.downloadedObjects}`,
-        description: this.formatSize(stats.downloadedSize)
+        description: this.formatSize(stats.downloadedSize),
       });
       if (stats.pendingObjects > 0) {
         items.push({
           label: `Pending: ${stats.pendingObjects}`,
-          description: this.formatSize(stats.pendingSize)
+          description: this.formatSize(stats.pendingSize),
         });
       }
     }
 
     items.push({
       label: '$(list-unordered) Tracked Patterns',
-      kind: vscode.QuickPickItemKind.Separator
+      kind: vscode.QuickPickItemKind.Separator,
     });
 
     for (const pattern of patterns) {
       items.push({
         label: pattern.pattern,
-        description: 'LFS tracked'
+        description: 'LFS tracked',
       });
     }
 
     items.push({
       label: '$(tools) Actions',
-      kind: vscode.QuickPickItemKind.Separator
+      kind: vscode.QuickPickItemKind.Separator,
     });
 
     items.push(
@@ -661,7 +651,7 @@ class LfsManagerClass {
     );
 
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Git LFS Status'
+      placeHolder: 'Git LFS Status',
     });
 
     if (!selected) {

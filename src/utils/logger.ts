@@ -164,27 +164,26 @@ export class Logger {
     const timestamp = entry.timestamp.toISOString();
     const levelStr = LogLevel[entry.level].toUpperCase().padEnd(5);
     const contextStr = entry.context ? `[${entry.context}]` : '';
-    
+
     let message = `${timestamp} ${levelStr} ${contextStr} ${entry.message}`;
-    
+
     if (entry.data !== undefined) {
       try {
-        const dataStr = typeof entry.data === 'object' 
-          ? JSON.stringify(entry.data, null, 2) 
-          : String(entry.data);
+        const dataStr =
+          typeof entry.data === 'object' ? JSON.stringify(entry.data, null, 2) : String(entry.data);
         message += `\n  Data: ${dataStr}`;
       } catch {
         message += `\n  Data: [Unable to serialize]`;
       }
     }
-    
+
     if (entry.error) {
       message += `\n  Error: ${entry.error.message}`;
       if (entry.error.stack) {
         message += `\n  Stack: ${entry.error.stack}`;
       }
     }
-    
+
     return message;
   }
 
@@ -222,7 +221,7 @@ export class Logger {
 
     // Write to output channel
     const formattedMessage = this.formatLogEntry(entry);
-    
+
     if (this.outputChannel) {
       switch (level) {
         case LogLevel.Trace:
@@ -315,7 +314,7 @@ export class Logger {
   startTimer(label: string): vscode.Disposable & { getDuration: () => number } {
     const start = performance.now();
     const getDuration = () => performance.now() - start;
-    
+
     return {
       getDuration,
       dispose: () => {
@@ -328,7 +327,12 @@ export class Logger {
   /**
    * Record a performance metric
    */
-  recordMetric(operation: string, duration: number, success: boolean, metadata?: Record<string, unknown>): void {
+  recordMetric(
+    operation: string,
+    duration: number,
+    success: boolean,
+    metadata?: Record<string, unknown>
+  ): void {
     const metric: PerformanceMetric = {
       operation,
       duration,
@@ -342,7 +346,9 @@ export class Logger {
       this.performanceMetrics.shift();
     }
 
-    this.trace(`📊 Metric: ${operation} - ${duration.toFixed(2)}ms (${success ? 'success' : 'failed'})`);
+    this.trace(
+      `📊 Metric: ${operation} - ${duration.toFixed(2)}ms (${success ? 'success' : 'failed'})`
+    );
   }
 
   /**
@@ -351,7 +357,7 @@ export class Logger {
   async timeAsync<T>(label: string, operation: () => Promise<T>): Promise<T> {
     const start = performance.now();
     let success = true;
-    
+
     try {
       const result = await operation();
       return result;

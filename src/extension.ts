@@ -9,10 +9,12 @@ import { registerDiffCommands } from './commands/diff';
 import { registerStashCommands } from './commands/stash';
 import { registerRebaseCommands } from './commands/rebase';
 import { registerMergeCommands } from './commands/merge';
+import { registerOperationCommands } from './commands/operation';
 import { registerRemoteCommands } from './commands/remote';
 import { registerAiCommands } from './commands/ai';
 import { registerGitHubCommands, registerGitHubView } from './commands/github';
 import { registerTreeViews } from './providers';
+import { registerRevisionContentProvider } from './providers/revisionContentProvider';
 import { registerWebviews } from './views';
 import { registerStatusBarItems } from './utils/statusBar';
 import { setupWorkspaceListeners } from './utils/workspaceListeners';
@@ -35,6 +37,7 @@ import {
   aiService,
   gitCodeLensProvider,
   gitHubService,
+  autolinkService,
 } from './services';
 
 /**
@@ -44,6 +47,7 @@ let gitService: GitService;
 let repositoryManager: RepositoryManager;
 let eventBus: EventBus;
 let configManager: ConfigManager;
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Extension activation function
@@ -83,6 +87,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Detect and set active repository
     await detectAndSetActiveRepository(repositoryManager);
 
+    // Autolinks resolve {owner}/{repo} from the active repository's remote
+    autolinkService.initialize(context);
+    context.subscriptions.push(
+      eventBus.on(EventType.RepositoryChanged, () => void autolinkService.refresh())
+    );
+
+    // Content provider backing native diff editors against arbitrary revisions
+    registerRevisionContentProvider(context, gitService);
+
     // Register commands
     registerBranchCommands(context, gitService, repositoryManager, eventBus);
     registerCommitCommands(context, gitService, repositoryManager, eventBus);
@@ -90,9 +103,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerStashCommands(context, gitService, repositoryManager, eventBus);
     registerRebaseCommands(context, gitService, repositoryManager, eventBus);
     registerMergeCommands(context, gitService, repositoryManager, eventBus);
+    registerOperationCommands(context, gitService, repositoryManager, eventBus);
     registerRemoteCommands(context, gitService, repositoryManager, eventBus);
     registerAiCommands(context, gitService, repositoryManager, eventBus);
-    registerGitHubCommands(context, repositoryManager, eventBus);
+    registerGitHubCommands(context, gitService, repositoryManager, eventBus);
     registerGitHubView(context);
 
     // Register global commands (refresh, init, clone)
@@ -113,13 +127,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Set up workspace event listeners
     setupWorkspaceListeners(context, repositoryManager, eventBus);
 
-    // Set up configuration change listeners
-    setupConfigListeners(context, configManager);
+    // Set up configuration change listeners (restarts auto-refresh on changes)
+    setupConfigListeners(context, configManager, () => setupAutoRefresh());
 
-    // Subscribe to configuration changes for auto-refresh
-    if (configManager.get('autoRefresh')) {
-      setupAutoRefresh();
-    }
+    // Set up auto-refresh based on configuration
+    setupAutoRefresh();
+    context.subscriptions.push({ dispose: () => stopAutoRefresh() });
 
     // Start session tracking
     await workspaceStateManager.startSession();
@@ -134,7 +147,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     telemetryService.trackFeature('extension.activated', {
       hasRepository: activeRepo ? true : false,
     });
-
   } catch (error) {
     logger.error('Failed to activate GitNova', error);
     await errorHandler.handleError(error, 'extension.activate', {
@@ -170,7 +182,7 @@ function registerEnterpriseCommands(
     vscode.commands.registerCommand('gitNova.worktree.create', async () => {
       await worktreeManager.showCreateDialog();
     }),
-    vscode.commands.registerCommand('gitNova.worktree.remove', async (worktree) => {
+    vscode.commands.registerCommand('gitNova.worktree.remove', async worktree => {
       if (worktree) {
         const confirm = await vscode.window.showWarningMessage(
           `Remove worktree "${worktree.name}"?`,
@@ -182,7 +194,7 @@ function registerEnterpriseCommands(
         }
       }
     }),
-    vscode.commands.registerCommand('gitNova.worktree.openInNewWindow', async (worktree) => {
+    vscode.commands.registerCommand('gitNova.worktree.openInNewWindow', async worktree => {
       if (worktree) {
         await worktreeManager.openWorktree(worktree);
       }
@@ -390,7 +402,7 @@ function registerEnterpriseCommands(
       if (repoPath) {
         const input = await vscode.window.showInputBox({
           prompt: 'Enter sparse checkout patterns (space-separated)',
-          placeHolder: 'src/ docs/ README.md'
+          placeHolder: 'src/ docs/ README.md',
         });
         if (input) {
           const patterns = input.split(/\s+/).filter(p => p);
@@ -412,7 +424,7 @@ function registerEnterpriseCommands(
         const count = await vscode.window.showInputBox({
           prompt: 'Number of commits to create patches for',
           value: '1',
-          validateInput: (v: string) => isNaN(parseInt(v)) ? 'Enter a number' : null
+          validateInput: (v: string) => (isNaN(parseInt(v)) ? 'Enter a number' : null),
         });
         if (count) {
           await advancedGitService.createPatches(repoPath, { count: parseInt(count) });
@@ -424,7 +436,7 @@ function registerEnterpriseCommands(
       if (repoPath) {
         const files = await vscode.window.showOpenDialog({
           canSelectMany: false,
-          filters: { 'Patch files': ['patch', 'diff'] }
+          filters: { 'Patch files': ['patch', 'diff'] },
         });
         if (files && files[0]) {
           await advancedGitService.applyPatch(repoPath, files[0].fsPath);
@@ -437,7 +449,7 @@ function registerEnterpriseCommands(
       const repoPath = gitService.getRepositoryPath();
       if (repoPath) {
         const aggressive = await vscode.window.showQuickPick(['Normal', 'Aggressive'], {
-          placeHolder: 'Select garbage collection mode'
+          placeHolder: 'Select garbage collection mode',
         });
         await advancedGitService.runGc(repoPath, { aggressive: aggressive === 'Aggressive' });
       }
@@ -460,15 +472,15 @@ function registerEnterpriseCommands(
       const repoPath = gitService.getRepositoryPath();
       if (repoPath) {
         const format = await vscode.window.showQuickPick(['zip', 'tar', 'tar.gz'], {
-          placeHolder: 'Select archive format'
+          placeHolder: 'Select archive format',
         });
         if (format) {
           const saveUri = await vscode.window.showSaveDialog({
-            filters: { 'Archive': [format === 'tar.gz' ? 'tar.gz' : format] }
+            filters: { Archive: [format === 'tar.gz' ? 'tar.gz' : format] },
           });
           if (saveUri) {
             await advancedGitService.createArchive(repoPath, saveUri.fsPath, {
-              format: format as 'zip' | 'tar' | 'tar.gz'
+              format: format as 'zip' | 'tar' | 'tar.gz',
             });
           }
         }
@@ -480,7 +492,7 @@ function registerEnterpriseCommands(
       const repoPath = gitService.getRepositoryPath();
       if (repoPath) {
         const saveUri = await vscode.window.showSaveDialog({
-          filters: { 'Git Bundle': ['bundle'] }
+          filters: { 'Git Bundle': ['bundle'] },
         });
         if (saveUri) {
           await advancedGitService.createBundle(repoPath, saveUri.fsPath);
@@ -494,10 +506,10 @@ function registerEnterpriseCommands(
       if (repoPath) {
         const commit = await vscode.window.showInputBox({
           prompt: 'Enter commit SHA (leave empty for HEAD)',
-          placeHolder: 'HEAD'
+          placeHolder: 'HEAD',
         });
         const message = await vscode.window.showInputBox({
-          prompt: 'Enter note message'
+          prompt: 'Enter note message',
         });
         if (message) {
           await advancedGitService.addNote(repoPath, commit || 'HEAD', message);
@@ -514,7 +526,7 @@ function registerEnterpriseCommands(
         }
         const items = notes.map(n => ({
           label: n.commit.substring(0, 8),
-          description: n.note.substring(0, 50)
+          description: n.note.substring(0, 50),
         }));
         await vscode.window.showQuickPick(items, { placeHolder: 'Commit notes' });
       }
@@ -653,6 +665,7 @@ export async function deactivate(): Promise<void> {
     await workspaceStateManager.endSession(totalOperations, errorHandler.getErrorHistory().length);
 
     // Dispose enterprise services first
+    autolinkService.dispose();
     gitHubService.dispose();
     gitCodeLensProvider.dispose();
     aiService.dispose();
@@ -720,12 +733,13 @@ async function detectAndSetActiveRepository(repositoryManager: RepositoryManager
     const gitService = getGitService();
     if (gitService) {
       const isValid = await gitService.isValidRepository(workspacePath);
-      
+
       if (!isValid) {
         logger.warn(`Workspace is not a git repository: ${workspacePath}`);
-        
+
         // Provide actionable options to the user
-        const message = 'This workspace is not a git repository. Some features may not work correctly.';
+        const message =
+          'This workspace is not a git repository. Some features may not work correctly.';
         const initializeAction = 'Initialize Git Repository';
         const selection = await vscode.window.showWarningMessage(
           message,
@@ -764,14 +778,37 @@ async function detectAndSetActiveRepository(repositoryManager: RepositoryManager
  * Set up auto-refresh based on configuration
  */
 function setupAutoRefresh(): void {
+  stopAutoRefresh();
+
+  const autoRefresh = configManager.get('autoRefresh');
   const refreshInterval = configManager.get('refreshInterval');
 
-  if (refreshInterval > 0) {
-    logger.info(`Setting up auto-refresh with interval: ${refreshInterval}ms`);
+  if (!autoRefresh || refreshInterval <= 0) {
+    logger.debug('Auto-refresh disabled');
+    return;
+  }
 
-    // Note: Auto-refresh will be implemented with workspace listeners
-    // This is a placeholder for future implementation
-    logger.debug('Auto-refresh will be handled by workspace listeners');
+  logger.info(`Setting up auto-refresh with interval: ${refreshInterval}ms`);
+
+  autoRefreshTimer = setInterval(async () => {
+    try {
+      if (repositoryManager.getActiveRepository()) {
+        await repositoryManager.refreshCache();
+        eventBus.emit(EventType.DiffChanged, { key: 'autoRefresh' });
+      }
+    } catch (error) {
+      logger.error('Auto-refresh failed', error);
+    }
+  }, refreshInterval);
+}
+
+/**
+ * Stop the auto-refresh timer
+ */
+function stopAutoRefresh(): void {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
   }
 }
 

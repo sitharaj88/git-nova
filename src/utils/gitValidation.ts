@@ -1,5 +1,3 @@
-import { logger } from '../utils/logger';
-
 /**
  * Validation result interface
  */
@@ -72,10 +70,7 @@ export class GitValidation {
   /**
    * Validate a branch name
    */
-  static validateBranchName(
-    name: string,
-    options: BranchValidationOptions = {}
-  ): ValidationResult {
+  static validateBranchName(name: string, options: BranchValidationOptions = {}): ValidationResult {
     const opts = { ...DEFAULT_BRANCH_OPTIONS, ...options };
     const warnings: string[] = [];
     const suggestions: string[] = [];
@@ -151,7 +146,7 @@ export class GitValidation {
     }
 
     // Cannot contain special characters
-    if (/[~^:?*\[\]@{\\]/.test(trimmedName)) {
+    if (/[~^:?*[\]@{\\]/.test(trimmedName)) {
       return {
         valid: false,
         error: 'Branch name cannot contain special characters: ~ ^ : ? * [ ] @ { \\',
@@ -323,7 +318,7 @@ export class GitValidation {
     }
 
     // Cannot contain special characters
-    if (/[~^:?*\[\]@{\\]/.test(trimmedName)) {
+    if (/[~^:?*[\]@{\\]/.test(trimmedName)) {
       return {
         valid: false,
         error: 'Tag name cannot contain special characters: ~ ^ : ? * [ ] @ { \\',
@@ -363,7 +358,7 @@ export class GitValidation {
     }
 
     // Cannot contain special characters
-    if (/[~^:?*\[\]@{\\\/]/.test(trimmedName)) {
+    if (/[~^:?*[\]@{\\/]/.test(trimmedName)) {
       return {
         valid: false,
         error: 'Remote name cannot contain special characters',
@@ -393,22 +388,23 @@ export class GitValidation {
 
     // HTTPS URL pattern
     const httpsPattern = /^https?:\/\/[^\s]+\.git$/i;
-    
+
     // SSH URL patterns
     const sshPattern1 = /^git@[^\s:]+:[^\s]+\.git$/i;
     const sshPattern2 = /^ssh:\/\/[^\s]+\.git$/i;
-    
+
     // Git protocol
     const gitPattern = /^git:\/\/[^\s]+\.git$/i;
 
     // File path (for local repos)
     const filePattern = /^(file:\/\/)?\/[^\s]+$/;
 
-    const isValid = httpsPattern.test(trimmedUrl) ||
-                    sshPattern1.test(trimmedUrl) ||
-                    sshPattern2.test(trimmedUrl) ||
-                    gitPattern.test(trimmedUrl) ||
-                    filePattern.test(trimmedUrl);
+    const isValid =
+      httpsPattern.test(trimmedUrl) ||
+      sshPattern1.test(trimmedUrl) ||
+      sshPattern2.test(trimmedUrl) ||
+      gitPattern.test(trimmedUrl) ||
+      filePattern.test(trimmedUrl);
 
     if (!isValid) {
       return {
@@ -491,7 +487,7 @@ export class GitValidation {
       .toLowerCase()
       .replace(/\s+/g, '-')
       .replace(/_+/g, '-')
-      .replace(/[~^:?*\[\]@{\\]/g, '')
+      .replace(/[~^:?*[\]@{\\]/g, '')
       .replace(/\.{2,}/g, '.')
       .replace(/\/{2,}/g, '/')
       .replace(/^[-./]+/, '')
@@ -511,25 +507,25 @@ export class GitValidation {
     footer?: string
   ): string {
     let message = type;
-    
+
     if (scope) {
       message += `(${scope})`;
     }
-    
+
     if (breaking) {
       message += '!';
     }
-    
+
     message += `: ${description}`;
-    
+
     if (body) {
       message += `\n\n${body}`;
     }
-    
+
     if (footer) {
       message += `\n\n${footer}`;
     }
-    
+
     return message;
   }
 
@@ -546,43 +542,43 @@ export class GitValidation {
   } | null {
     const lines = message.split('\n');
     const subject = lines[0];
-    
+
     const match = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
-    
+
     if (!match) {
       return null;
     }
 
     const [, type, scope, breaking, description] = match;
-    
+
     // Find body and footer
     let body: string | undefined;
     let footer: string | undefined;
-    
+
     if (lines.length > 2) {
       const bodyLines: string[] = [];
       const footerLines: string[] = [];
       let inFooter = false;
-      
+
       for (let i = 2; i < lines.length; i++) {
         const line = lines[i];
-        
+
         // Footer starts with a token like BREAKING CHANGE: or Fixes #
         if (/^[\w-]+:\s|^[\w-]+\s#/.test(line)) {
           inFooter = true;
         }
-        
+
         if (inFooter) {
           footerLines.push(line);
         } else {
           bodyLines.push(line);
         }
       }
-      
+
       if (bodyLines.length > 0) {
         body = bodyLines.join('\n').trim();
       }
-      
+
       if (footerLines.length > 0) {
         footer = footerLines.join('\n').trim();
       }

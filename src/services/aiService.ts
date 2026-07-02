@@ -277,6 +277,37 @@ export function buildConflictPrompt(filePath: string, content: string): ChatMess
   ];
 }
 
+/**
+ * Build the prompt for AI pull-request description generation.
+ * @param commits - Commit subjects on the branch (newest first)
+ * @param diff - Raw unified diff of base...head
+ * @param meta - Head and base branch names for context
+ */
+export function buildPullRequestPrompt(
+  commits: string[],
+  diff: string,
+  meta: { head: string; base: string }
+): ChatMessage[] {
+  const system =
+    'You are writing a GitHub pull request description for a teammate to review. ' +
+    'Summarize the intent of the whole branch, not each commit individually. ' +
+    'Use short Markdown sections: "## Summary" (1-3 sentences), "## Changes" (bulleted), ' +
+    'and "## Notes" only when there are risks, breaking changes or follow-ups worth calling out. ' +
+    'Output ONLY the description body — no title, no markdown fences, no preamble.';
+
+  const commitList = commits.length
+    ? `Commits on this branch (newest first):\n${commits.map(c => `- ${c}`).join('\n')}\n\n`
+    : '';
+  const user =
+    `Write a pull request description for merging \`${meta.head}\` into \`${meta.base}\`.\n\n` +
+    `${commitList}\`\`\`diff\n${truncateDiff(diff)}\n\`\`\``;
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
 /** Strip a leading/trailing Markdown code fence if a model added one anyway. */
 export function stripCodeFence(text: string): string {
   const fence = text.match(/^```[\w-]*\n([\s\S]*?)\n```\s*$/);

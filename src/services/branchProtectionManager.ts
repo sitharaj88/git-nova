@@ -85,9 +85,7 @@ const DEFAULT_PROTECTED_BRANCHES: BranchProtectionRule[] = [
  */
 const DEFAULT_NAMING_CONVENTION: BranchNamingConvention = {
   enabled: false,
-  patterns: [
-    '^(feature|bugfix|hotfix|release|docs|chore|refactor|test)/[a-z0-9-]+$',
-  ],
+  patterns: ['^(feature|bugfix|hotfix|release|docs|chore|refactor|test)/[a-z0-9-]+$'],
   prefixes: ['feature', 'bugfix', 'hotfix', 'release', 'docs', 'chore', 'refactor', 'test'],
   separator: '/',
   requireTicketNumber: false,
@@ -132,18 +130,22 @@ export class BranchProtectionManager {
   /**
    * Initialize with configuration
    */
-  initialize(context: vscode.ExtensionContext): void {
+  initialize(_context: vscode.ExtensionContext): void {
     this.loadConfiguration();
-    
+
     // Watch for configuration changes
-    const configWatcher = vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-      if (e.affectsConfiguration('gitNova.branchProtection') || 
-          e.affectsConfiguration('gitNova.branchNaming')) {
-        this.loadConfiguration();
+    const configWatcher = vscode.workspace.onDidChangeConfiguration(
+      (e: vscode.ConfigurationChangeEvent) => {
+        if (
+          e.affectsConfiguration('gitNova.branchProtection') ||
+          e.affectsConfiguration('gitNova.branchNaming')
+        ) {
+          this.loadConfiguration();
+        }
       }
-    });
+    );
     this.disposables.push(configWatcher);
-    
+
     logger.info('BranchProtectionManager initialized');
   }
 
@@ -152,7 +154,7 @@ export class BranchProtectionManager {
    */
   private loadConfiguration(): void {
     const config = vscode.workspace.getConfiguration('gitNova');
-    
+
     // Load protection rules
     const customRules = config.get<BranchProtectionRule[]>('branchProtection.rules');
     if (customRules && customRules.length > 0) {
@@ -160,14 +162,14 @@ export class BranchProtectionManager {
     } else {
       this.protectionRules = [...DEFAULT_PROTECTED_BRANCHES];
     }
-    
+
     // Load naming convention
     const namingEnabled = config.get<boolean>('branchNaming.enabled', false);
     const namingPrefixes = config.get<string[]>('branchNaming.prefixes');
     const namingRequireTicket = config.get<boolean>('branchNaming.requireTicketNumber', false);
     const namingTicketPattern = config.get<string>('branchNaming.ticketPattern');
     const namingMaxLength = config.get<number>('branchNaming.maxLength', 100);
-    
+
     this.namingConvention = {
       ...DEFAULT_NAMING_CONVENTION,
       enabled: namingEnabled,
@@ -176,7 +178,7 @@ export class BranchProtectionManager {
       ticketPattern: namingTicketPattern || DEFAULT_NAMING_CONVENTION.ticketPattern,
       maxLength: namingMaxLength,
     };
-    
+
     logger.debug('Branch protection configuration loaded', {
       rulesCount: this.protectionRules.length,
       namingEnabled: this.namingConvention.enabled,
@@ -218,7 +220,7 @@ export class BranchProtectionManager {
    */
   validateDelete(branchName: string): BranchOperationValidation {
     const rule = this.getProtectionRule(branchName);
-    
+
     if (rule && rule.preventDelete) {
       return {
         allowed: false,
@@ -226,7 +228,7 @@ export class BranchProtectionManager {
         reason: `Branch '${branchName}' is protected and cannot be deleted.`,
       };
     }
-    
+
     return { allowed: true };
   }
 
@@ -235,7 +237,7 @@ export class BranchProtectionManager {
    */
   validateForcePush(branchName: string): BranchOperationValidation {
     const rule = this.getProtectionRule(branchName);
-    
+
     if (rule && rule.preventForcePush) {
       return {
         allowed: false,
@@ -243,7 +245,7 @@ export class BranchProtectionManager {
         reason: `Force push to '${branchName}' is not allowed. This branch is protected.`,
       };
     }
-    
+
     return { allowed: true };
   }
 
@@ -252,7 +254,7 @@ export class BranchProtectionManager {
    */
   validateDirectPush(branchName: string): BranchOperationValidation {
     const rule = this.getProtectionRule(branchName);
-    
+
     if (rule && rule.requirePullRequest) {
       return {
         allowed: false,
@@ -261,7 +263,7 @@ export class BranchProtectionManager {
         warnings: ['This branch requires changes to be submitted via pull request.'],
       };
     }
-    
+
     return { allowed: true };
   }
 
@@ -270,7 +272,7 @@ export class BranchProtectionManager {
    */
   validateBranchName(branchName: string): BranchOperationValidation {
     const warnings: string[] = [];
-    
+
     // First, do basic Git validation
     const gitValidation = GitValidation.validateBranchName(branchName);
     if (!gitValidation.valid) {
@@ -279,11 +281,11 @@ export class BranchProtectionManager {
         reason: gitValidation.error,
       };
     }
-    
+
     if (gitValidation.warnings) {
       warnings.push(...gitValidation.warnings);
     }
-    
+
     // Check naming convention if enabled
     if (this.namingConvention.enabled) {
       // Check length
@@ -293,19 +295,19 @@ export class BranchProtectionManager {
           reason: `Branch name exceeds maximum length of ${this.namingConvention.maxLength} characters.`,
         };
       }
-      
+
       // Check prefix
-      const hasValidPrefix = this.namingConvention.prefixes.some(prefix => 
+      const hasValidPrefix = this.namingConvention.prefixes.some(prefix =>
         branchName.startsWith(prefix + this.namingConvention.separator)
       );
-      
+
       if (!hasValidPrefix) {
         return {
           allowed: false,
           reason: `Branch name must start with one of: ${this.namingConvention.prefixes.join(', ')}`,
         };
       }
-      
+
       // Check ticket number if required
       if (this.namingConvention.requireTicketNumber && this.namingConvention.ticketPattern) {
         const ticketRegex = new RegExp(this.namingConvention.ticketPattern);
@@ -316,7 +318,7 @@ export class BranchProtectionManager {
           };
         }
       }
-      
+
       // Check against patterns
       const matchesPattern = this.namingConvention.patterns.some(pattern => {
         try {
@@ -326,12 +328,12 @@ export class BranchProtectionManager {
           return false;
         }
       });
-      
+
       if (!matchesPattern) {
         warnings.push('Branch name does not match the recommended naming pattern.');
       }
     }
-    
+
     return {
       allowed: true,
       warnings: warnings.length > 0 ? warnings : undefined,
@@ -343,21 +345,21 @@ export class BranchProtectionManager {
    */
   suggestBranchName(input: string, type: string = 'feature'): string {
     let suggestion = GitValidation.sanitizeBranchName(input);
-    
+
     // Add prefix if not present
     const hasPrefix = this.namingConvention.prefixes.some(prefix =>
       suggestion.startsWith(prefix + this.namingConvention.separator)
     );
-    
+
     if (!hasPrefix && this.namingConvention.prefixes.includes(type)) {
       suggestion = `${type}${this.namingConvention.separator}${suggestion}`;
     }
-    
+
     // Truncate if needed
     if (suggestion.length > this.namingConvention.maxLength) {
       suggestion = suggestion.substring(0, this.namingConvention.maxLength);
     }
-    
+
     return suggestion;
   }
 
@@ -365,9 +367,7 @@ export class BranchProtectionManager {
    * Get all protected branch names
    */
   getProtectedBranches(): string[] {
-    return this.protectionRules
-      .filter(rule => !rule.isRegex)
-      .map(rule => rule.pattern);
+    return this.protectionRules.filter(rule => !rule.isRegex).map(rule => rule.pattern);
   }
 
   /**
@@ -415,23 +415,27 @@ export class BranchProtectionManager {
    */
   async showCreateBranchDialog(defaultType?: string): Promise<string | undefined> {
     // First, let user pick a type
-    const type = defaultType || await vscode.window.showQuickPick(
-      this.namingConvention.prefixes.map(prefix => ({
-        label: prefix,
-        description: `${prefix}${this.namingConvention.separator}your-branch-name`,
-      })),
-      {
-        placeHolder: 'Select branch type',
-        title: 'Create New Branch',
-      }
-    ).then((item: vscode.QuickPickItem | undefined) => item?.label);
-    
+    const type =
+      defaultType ||
+      (await vscode.window
+        .showQuickPick(
+          this.namingConvention.prefixes.map(prefix => ({
+            label: prefix,
+            description: `${prefix}${this.namingConvention.separator}your-branch-name`,
+          })),
+          {
+            placeHolder: 'Select branch type',
+            title: 'Create New Branch',
+          }
+        )
+        .then((item: vscode.QuickPickItem | undefined) => item?.label));
+
     if (!type) return undefined;
-    
+
     // Then get the branch name
     const input = await vscode.window.showInputBox({
       prompt: 'Enter branch name',
-      placeHolder: this.namingConvention.requireTicketNumber 
+      placeHolder: this.namingConvention.requireTicketNumber
         ? `${type}${this.namingConvention.separator}TICKET-123-description`
         : `${type}${this.namingConvention.separator}branch-description`,
       value: `${type}${this.namingConvention.separator}`,
@@ -443,7 +447,7 @@ export class BranchProtectionManager {
         return null;
       },
     });
-    
+
     return input;
   }
 
@@ -456,19 +460,19 @@ export class BranchProtectionManager {
     validation: BranchOperationValidation
   ): Promise<boolean> {
     if (validation.allowed) return true;
-    
+
     const result = await vscode.window.showWarningMessage(
       validation.reason || `Cannot ${operation} protected branch '${branchName}'.`,
       { modal: true },
       'Override (Admin)',
       'Cancel'
     );
-    
+
     if (result === 'Override (Admin)') {
       logger.warn(`Admin override for protected branch operation: ${operation} on ${branchName}`);
       return true;
     }
-    
+
     return false;
   }
 

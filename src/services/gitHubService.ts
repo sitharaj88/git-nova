@@ -32,6 +32,17 @@ export interface GitHubIssue {
 export interface RepoSlug {
   owner: string;
   repo: string;
+  /** Name of the git remote the slug was parsed from (e.g. `origin`). */
+  remote?: string;
+}
+
+/** Parameters accepted by {@link GitHubService.createPullRequest}. */
+export interface CreatePullRequestParams {
+  title: string;
+  body?: string;
+  head: string;
+  base: string;
+  draft?: boolean;
 }
 
 /**
@@ -77,7 +88,8 @@ export class GitHubService {
         remotes.find(r => r.name === 'origin') ??
         remotes.find(r => /github\.com/i.test(r.fetchUrl)) ??
         remotes[0];
-      return GitHubService.parseSlug(preferred.fetchUrl);
+      const slug = GitHubService.parseSlug(preferred.fetchUrl);
+      return slug ? { ...slug, remote: preferred.name } : undefined;
     } catch (error) {
       logger.warn(`Failed to resolve GitHub repo slug: ${error}`);
       return undefined;
@@ -107,17 +119,24 @@ export class GitHubService {
     return (await this.getRepoSlug()) !== undefined;
   }
 
-  private async request<T>(path: string, createIfNone = true): Promise<T> {
+  private async request<T>(
+    path: string,
+    init?: { method?: string; body?: unknown },
+    createIfNone = true
+  ): Promise<T> {
     const token = await this.getToken(createIfNone);
     if (!token) {
       throw new Error('GitHub sign-in is required for this feature.');
     }
     const res = await fetch(`https://api.github.com${path}`, {
+      method: init?.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
+        ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -135,7 +154,11 @@ export class GitHubService {
     const prs = await this.request<RawPullRequest[]>(
       `/repos/${slug.owner}/${slug.repo}/pulls?state=open&sort=updated&direction=desc&per_page=50`
     );
-    return prs.map(pr => ({
+    return prs.map(pr => GitHubService.toPullRequest(pr));
+  }
+
+  private static toPullRequest(pr: RawPullRequest): GitHubPullRequest {
+    return {
       number: pr.number,
       title: pr.title,
       state: pr.state,
@@ -146,7 +169,57 @@ export class GitHubService {
       url: pr.html_url,
       body: pr.body ?? '',
       updatedAt: pr.updated_at,
-    }));
+    };
+  }
+
+  /** The repository's default branch (e.g. `main`), from GET /repos/{owner}/{repo}. */
+  async getDefaultBranch(owner: string, repo: string): Promise<string> {
+    const info = await this.request<{ default_branch: string }>(`/repos/${owner}/${repo}`);
+    return info.default_branch;
+  }
+
+  /** Create a pull request via POST /repos/{owner}/{repo}/pulls. */
+  async createPullRequest(
+    owner: string,
+    repo: string,
+    params: CreatePullRequestParams
+  ): Promise<GitHubPullRequest> {
+    const pr = await this.request<RawPullRequest>(`/repos/${owner}/${repo}/pulls`, {
+      method: 'POST',
+      body: {
+        title: params.title,
+        body: params.body ?? '',
+        head: params.head,
+        base: params.base,
+        draft: !!params.draft,
+      },
+    });
+    logger.info(`Created pull request #${pr.number} (${params.head} → ${params.base})`);
+    return GitHubService.toPullRequest(pr);
+  }
+
+  /**
+   * Whether a local branch has an upstream and how far ahead of it it is —
+   * used to decide if a push is needed before opening a PR.
+   */
+  async getBranchSyncState(branch: string): Promise<{ hasUpstream: boolean; ahead: number }> {
+    if (!this.gitService) {
+      throw new Error('Git service unavailable.');
+    }
+    const repoPath = this.gitService.getRepositoryPath();
+    if (!repoPath) {
+      throw new Error('No active repository.');
+    }
+    let upstream: string;
+    try {
+      upstream = (
+        await this.runGit(repoPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`])
+      ).trim();
+    } catch {
+      return { hasUpstream: false, ahead: 0 };
+    }
+    const count = await this.runGit(repoPath, ['rev-list', '--count', `${upstream}..${branch}`]);
+    return { hasUpstream: true, ahead: parseInt(count.trim(), 10) || 0 };
   }
 
   /** List open issues (excluding PRs, which the issues endpoint also returns). */

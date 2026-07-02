@@ -32,16 +32,6 @@ abstract class BranchTreeItem extends vscode.TreeItem {
 }
 
 /**
- * Root item for the branch tree
- */
-class RootItem extends BranchTreeItem {
-  constructor() {
-    super('Branches', TreeItemType.Root, vscode.TreeItemCollapsibleState.Expanded);
-    this.iconPath = new vscode.ThemeIcon('git-branch');
-  }
-}
-
-/**
  * Local branches container
  */
 class LocalBranchesItem extends BranchTreeItem {
@@ -188,9 +178,10 @@ export class BranchProvider implements vscode.TreeDataProvider<BranchTreeItem> {
       case TreeItemType.RemoteBranches:
         return await this.getRemoteContainers();
 
-      case TreeItemType.Remote:
+      case TreeItemType.Remote: {
         const remoteItem = element as RemoteItem;
         return await this.getRemoteBranchItems(remoteItem.remoteName);
+      }
 
       default:
         return [];
@@ -362,9 +353,9 @@ export function registerBranchProvider(
 function registerBranchContextMenuCommands(
   context: vscode.ExtensionContext,
   branchProvider: BranchProvider,
-  gitService: GitService,
-  repositoryManager: RepositoryManager,
-  eventBus: EventBus
+  _gitService: GitService,
+  _repositoryManager: RepositoryManager,
+  _eventBus: EventBus
 ): void {
   // Switch to branch
   const switchBranchCommand = vscode.commands.registerCommand(

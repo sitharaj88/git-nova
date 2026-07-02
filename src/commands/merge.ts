@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
@@ -129,10 +130,16 @@ export function registerMergeCommands(
   // ==================== Continue Merge ====================
   const continueMergeCommand = vscode.commands.registerCommand(MergeCommands.Continue, async () => {
     try {
-      const conflicts = await gitService.getMergeConflicts();
-
-      if (conflicts.length === 0) {
+      if (gitService.getOperationState().type !== 'merge') {
         showInfoNotification('No merge in progress');
+        return;
+      }
+
+      const conflicts = await gitService.getMergeConflicts();
+      if (conflicts.length > 0) {
+        showErrorNotification(
+          `Resolve ${conflicts.length} conflicted file${conflicts.length !== 1 ? 's' : ''} before continuing the merge`
+        );
         return;
       }
 
@@ -168,9 +175,7 @@ export function registerMergeCommands(
   // ==================== Abort Merge ====================
   const abortMergeCommand = vscode.commands.registerCommand(MergeCommands.Abort, async () => {
     try {
-      const conflicts = await gitService.getMergeConflicts();
-
-      if (conflicts.length === 0) {
+      if (gitService.getOperationState().type !== 'merge') {
         showInfoNotification('No merge in progress');
         return;
       }
@@ -235,10 +240,21 @@ export function registerMergeCommands(
           return;
         }
 
-        // Open the file for editing
-        const uri = vscode.Uri.file(fileToResolve);
-        await vscode.commands.executeCommand('vscode.open', uri);
-        showInfoNotification(`Open ${fileToResolve} for manual resolution`);
+        const repoPath = gitService.getRepositoryPath();
+        const uri = vscode.Uri.file(
+          path.isAbsolute(fileToResolve) || !repoPath
+            ? fileToResolve
+            : path.join(repoPath, fileToResolve)
+        );
+
+        // Prefer VS Code's built-in 3-way merge editor (registered by the
+        // bundled git extension); fall back to a plain editor if unavailable.
+        try {
+          await vscode.commands.executeCommand('git.openMergeEditor', uri);
+        } catch (mergeEditorError) {
+          logger.warn(`Merge editor unavailable, opening file directly: ${mergeEditorError}`);
+          await vscode.commands.executeCommand('vscode.open', uri);
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         showErrorNotification(`Failed to resolve conflict: ${errorMessage}`);

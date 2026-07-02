@@ -34,7 +34,10 @@ class SourceControlTreeItem extends vscode.TreeItem {
 class BranchItem extends SourceControlTreeItem {
   constructor(branchName: string, isClean: boolean) {
     super(branchName, TreeItemType.Branch);
-    this.iconPath = new vscode.ThemeIcon('git-branch', new vscode.ThemeColor('gitDecoration.addedResourceForeground'));
+    this.iconPath = new vscode.ThemeIcon(
+      'git-branch',
+      new vscode.ThemeColor('gitDecoration.addedResourceForeground')
+    );
     this.description = isClean ? '✓ Clean' : '● Modified';
     this.tooltip = `Current branch: ${branchName}`;
   }
@@ -50,13 +53,19 @@ class SyncStatusItem extends SourceControlTreeItem {
 
     if (ahead === 0 && behind === 0) {
       label = 'Up to date';
-      icon = new vscode.ThemeIcon('check', new vscode.ThemeColor('gitDecoration.addedResourceForeground'));
+      icon = new vscode.ThemeIcon(
+        'check',
+        new vscode.ThemeColor('gitDecoration.addedResourceForeground')
+      );
     } else {
       const parts: string[] = [];
       if (ahead > 0) parts.push(`↑ ${ahead}`);
       if (behind > 0) parts.push(`↓ ${behind}`);
       label = parts.join('  ');
-      icon = new vscode.ThemeIcon('cloud', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+      icon = new vscode.ThemeIcon(
+        'cloud',
+        new vscode.ThemeColor('gitDecoration.modifiedResourceForeground')
+      );
     }
 
     super(label, TreeItemType.SyncStatus);
@@ -74,18 +83,24 @@ class ChangesCountItem extends SourceControlTreeItem {
     const total = staged + unstaged + untracked;
     const label = total === 0 ? 'No changes' : `${total} changes`;
     super(label, TreeItemType.ChangesCount);
-    
+
     if (total === 0) {
-      this.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('gitDecoration.addedResourceForeground'));
+      this.iconPath = new vscode.ThemeIcon(
+        'pass',
+        new vscode.ThemeColor('gitDecoration.addedResourceForeground')
+      );
     } else {
-      this.iconPath = new vscode.ThemeIcon('file-diff', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+      this.iconPath = new vscode.ThemeIcon(
+        'file-diff',
+        new vscode.ThemeColor('gitDecoration.modifiedResourceForeground')
+      );
     }
-    
+
     const parts: string[] = [];
     if (staged > 0) parts.push(`${staged} staged`);
     if (unstaged > 0) parts.push(`${unstaged} modified`);
     if (untracked > 0) parts.push(`${untracked} untracked`);
-    
+
     this.description = parts.join(', ') || 'All files committed';
     this.tooltip = `Staged: ${staged}, Modified: ${unstaged}, Untracked: ${untracked}`;
   }
@@ -99,7 +114,7 @@ class LastCommitItem extends SourceControlTreeItem {
     const shortHash = hash.substring(0, 7);
     const shortMessage = message.length > 40 ? message.substring(0, 40) + '...' : message;
     super(shortMessage, TreeItemType.LastCommit);
-    
+
     this.iconPath = new vscode.ThemeIcon('git-commit');
     this.description = `${shortHash} by ${author}`;
     this.tooltip = `${hash}\n${message}\n\nBy: ${author}\nDate: ${date.toLocaleString()}`;
@@ -148,7 +163,7 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
       // Get current branch
       const currentBranch = await this.gitService.getCurrentBranch();
       const status = await this.gitService.getWorkingTreeStatus();
-      
+
       // Calculate changes
       const stagedCount = status.staged?.length || 0;
       const modifiedCount = status.unstaged?.length || 0;
@@ -171,17 +186,18 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
         const commits = await this.gitService.getCommits({ maxCount: 1 });
         if (commits.length > 0) {
           const lastCommit = commits[0];
-          items.push(new LastCommitItem(
-            lastCommit.hash,
-            lastCommit.message,
-            lastCommit.author.name,
-            lastCommit.date
-          ));
+          items.push(
+            new LastCommitItem(
+              lastCommit.hash,
+              lastCommit.message,
+              lastCommit.author.name,
+              lastCommit.date
+            )
+          );
         }
       } catch {
         // No commits yet
       }
-
     } catch (error) {
       logger.error('SourceControlProvider: Error getting repository info', error);
     }
@@ -191,24 +207,16 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
 
   private setupEventListeners(): void {
     // Listen to branch changes
-    this.disposables.push(
-      this.eventBus.on(EventType.BranchSwitched, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.BranchSwitched, () => this.refresh()));
 
     // Listen to commit changes
-    this.disposables.push(
-      this.eventBus.on(EventType.CommitCreated, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.CommitCreated, () => this.refresh()));
 
     // Listen to repository changes
-    this.disposables.push(
-      this.eventBus.on(EventType.RepositoryChanged, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.RepositoryChanged, () => this.refresh()));
 
     // Listen to stash changes
-    this.disposables.push(
-      this.eventBus.on(EventType.StashCreated, () => this.refresh())
-    );
+    this.disposables.push(this.eventBus.on(EventType.StashCreated, () => this.refresh()));
   }
 
   dispose(): void {

@@ -21,7 +21,6 @@ export interface ExtensionConfig {
   commitDisplayFormat: 'full' | 'compact';
 
   // Diff settings
-  diffViewMode: 'unified' | 'side-by-side';
   ignoreWhitespace: boolean;
   showLineNumbers: boolean;
 
@@ -53,7 +52,6 @@ const DEFAULT_CONFIG: ExtensionConfig = {
   commitMessageTemplate: '',
   showCommitGraph: true,
   commitDisplayFormat: 'full',
-  diffViewMode: 'unified',
   ignoreWhitespace: false,
   showLineNumbers: true,
   autoStashBeforeRebase: false,
@@ -244,7 +242,6 @@ export class ConfigManager {
         'commitDisplayFormat',
         DEFAULT_CONFIG.commitDisplayFormat
       ),
-      diffViewMode: vscodeConfig.get('diffViewMode', DEFAULT_CONFIG.diffViewMode),
       ignoreWhitespace: vscodeConfig.get('ignoreWhitespace', DEFAULT_CONFIG.ignoreWhitespace),
       showLineNumbers: vscodeConfig.get('showLineNumbers', DEFAULT_CONFIG.showLineNumbers),
       autoStashBeforeRebase: vscodeConfig.get(
