@@ -188,8 +188,7 @@ Robust error management:
 - **TypeScript 5.x** - Type-safe development
 - **VSCode Extension API** - Native integration with VSCode
 - **Simple-git 3.x** - Git operations wrapper
-- **React 18.x** - Modern UI components for webviews
-- **Zustand 4.x** - Lightweight state management
+- **Native webviews** - Dependency-free HTML/CSS/JS panels using VS Code theme variables
 - **esbuild** - Fast bundling and compilation
 
 ## Installation
@@ -321,6 +320,53 @@ The extension can be configured through VSCode settings:
 }
 ```
 
+### Workflow Automation
+
+```json
+{
+  "gitNova.autoFetch": false,
+  "gitNova.autoFetchInterval": 300000,
+  "gitNova.autoPushAfterCommit": false,
+  "gitNova.autoStashBeforeRebase": false,
+  "gitNova.includeUntrackedInStash": false,
+  "gitNova.commitMessageTemplate": ""
+}
+```
+
+### Commit History Display
+
+```json
+{
+  "gitNova.showCommitGraph": true,
+  "gitNova.commitDisplayFormat": "full"
+}
+```
+
+### AI Settings
+
+```json
+{
+  "gitNova.ai.enabled": true,
+  "gitNova.ai.provider": "vscode",
+  "gitNova.ai.vscodeModelFamily": "",
+  "gitNova.ai.baseUrl": "https://api.openai.com/v1",
+  "gitNova.ai.model": "gpt-4o-mini",
+  "gitNova.ai.conventionalCommits": true
+}
+```
+
+`provider: "vscode"` uses the VS Code Language Model API (GitHub Copilot or any installed chat model, no API key). `provider: "openai-compatible"` works with any Chat Completions endpoint (OpenAI, Azure OpenAI, Ollama, LM Studio, Groq, OpenRouter) — set the key via `GitNova: Set AI Provider API Key` (stored in SecretStorage).
+
+### CodeLens Settings
+
+```json
+{
+  "gitNova.codeLens.enabled": true,
+  "gitNova.codeLens.showFileAuthors": true,
+  "gitNova.codeLens.showSymbols": true
+}
+```
+
 ### Branch Protection
 
 ```json
@@ -416,7 +462,6 @@ git-nova/
 │   │   └── lfsManager.ts
 │   ├── views/             # Webview panel managers
 │   └── utils/             # Utility functions
-├── webviews/              # React webview source
 ├── test/                  # Test files
 │   └── unit/             # Unit tests
 └── resources/             # Icons and schemas

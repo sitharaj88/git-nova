@@ -2,7 +2,7 @@
   "name": "git-nova",
   "displayName": "GitNova",
   "description": "Visualise and manage your Git workflow with a rhythm. The heartbeat of your codebase.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "sitharaj",
   "repository": {
     "type": "git",
@@ -1789,8 +1789,6 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.107.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
@@ -1804,9 +1802,6 @@
     "typescript": "^5.2.0"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "simple-git": "^3.19.0",
-    "zustand": "^4.4.0"
+    "simple-git": "^3.19.0"
   }
 }

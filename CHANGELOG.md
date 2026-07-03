@@ -2,7 +2,7 @@
 
 All notable changes to the "GitNova" extension will be documented in this file.
 
-## [Unreleased]
+## [1.2.0] - 2026-07-03
 
 ### Added
 - **History rewriting commands**: `Cherry-pick Commit`, `Revert Commit`, `Amend Last Commit`, `Reset to Commit (Soft/Mixed/Hard)`, `Squash Commits`, and `Create Fixup Commit` — from the palette or the Commit History context menu.
@@ -13,6 +13,17 @@ All notable changes to the "GitNova" extension will be documented in this file.
 - **Create Pull Request**: guided in-editor PR creation (push check, base branch pick, title, draft toggle) with an optional **AI-generated description** from the branch diff.
 - **Autolinks**: `gitNova.autolinks` rules turn issue references (e.g. `#123`) in commit messages into clickable links; `{owner}`/`{repo}` placeholders resolve from the GitHub remote.
 - **Status bar blame**: blame for the current line in the status bar (`gitNova.blame.statusBar`), and a configurable inline annotation template (`gitNova.blame.format`).
+- **Rich Diff Viewer**: the all-files unified patch overview is now reachable via `GitNova: Open Diff Viewer` (staged-mode, multi-file rendering, and disposal bugs fixed).
+
+### Fixed
+- Rebase/merge in-progress detection never matched, so `Continue`/`Abort` commands reported "no operation in progress"; merge continue/abort also failed once all conflicts were staged.
+- `gitNova.showStatusBar`, `gitNova.autoRefresh`, and `gitNova.refreshInterval` are now actually honored.
+- Blame annotations now read the documented `gitNova.blame.*` settings (previously several undocumented keys were consulted).
+- Conflicted files opened from merge flows resolved against the wrong (relative) path.
+
+### Removed
+- 12 dead settings that were declared but never read (`gitNova.branchProtection.enabled`/`protectedPatterns`/`requirePullRequest`, `gitNova.branchNaming.pattern`, `gitNova.performance.*`, `gitNova.telemetry.enabled`, `gitNova.worktree.*`, `gitNova.logging.*`) — branch protection is configured via `gitNova.branchProtection.rules` instead. `gitNova.diffViewMode` was removed because native diff editors follow VS Code's own inline/side-by-side toggle.
+- Unused React/Zustand webview pipeline (never loaded at runtime); webviews are dependency-free HTML/CSS/JS. Shrinks the install footprint.
 
 ## [1.1.0] - 2026-06-20
 

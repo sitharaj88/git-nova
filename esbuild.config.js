@@ -41,43 +41,9 @@ const buildExtension = async () => {
   }
 };
 
-const buildWebview = async () => {
-  console.log('Building webview...');
-
-  const webviewOutDir = path.join(__dirname, 'out', 'webview');
-  if (!fs.existsSync(webviewOutDir)) {
-    fs.mkdirSync(webviewOutDir, { recursive: true });
-  }
-
-  const webviewContext = await esbuild.context({
-    entryPoints: [path.join(__dirname, 'webviews', 'src', 'index.tsx')],
-    bundle: true,
-    outfile: path.join(__dirname, 'out', 'webview', 'index.js'),
-    format: 'iife',
-    target: 'es2020',
-    sourcemap: !isProduction,
-    minify: isProduction,
-    logLevel: 'info',
-    loader: {
-      '.tsx': 'tsx',
-      '.ts': 'ts',
-    },
-    jsx: 'automatic',
-    inject: [path.join(__dirname, 'webviews', 'src', 'react-shim.js')],
-  });
-
-  if (isWatch) {
-    await webviewContext.watch();
-  } else {
-    await webviewContext.rebuild();
-    await webviewContext.dispose();
-    console.log('Webview built successfully!');
-  }
-};
-
 const buildAll = async () => {
   try {
-    await Promise.all([buildExtension(), buildWebview()]);
+    await buildExtension();
   } catch (error) {
     console.error('Build failed:', error);
     process.exit(1);
