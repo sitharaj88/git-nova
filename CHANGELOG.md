@@ -2,7 +2,7 @@
 
 All notable changes to the "GitNova" extension will be documented in this file.
 
-## [1.2.0] - 2026-07-03
+## [2.1.0] - 2026-07-03
 
 ### Added
 - **History rewriting commands**: `Cherry-pick Commit`, `Revert Commit`, `Amend Last Commit`, `Reset to Commit (Soft/Mixed/Hard)`, `Squash Commits`, and `Create Fixup Commit` — from the palette or the Commit History context menu.
