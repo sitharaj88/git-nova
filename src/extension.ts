@@ -13,6 +13,7 @@ import { registerMergeCommands } from './commands/merge';
 import { registerOperationCommands } from './commands/operation';
 import { registerRemoteCommands } from './commands/remote';
 import { registerAiCommands } from './commands/ai';
+import { registerAiHistoryCommands } from './commands/aiHistory';
 import { registerGitHubCommands, registerGitHubView } from './commands/github';
 import { registerTreeViews } from './providers';
 import { registerRevisionContentProvider } from './providers/revisionContentProvider';
@@ -137,6 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerOperationCommands(context, gitService, repositoryManager, eventBus);
     registerRemoteCommands(context, gitService, repositoryManager, eventBus);
     registerAiCommands(context, gitService, repositoryManager, eventBus);
+    registerAiHistoryCommands(context, gitService);
     registerGitHubCommands(context, gitService, repositoryManager, eventBus);
     registerGitHubView(context);
 

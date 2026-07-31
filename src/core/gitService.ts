@@ -339,6 +339,14 @@ export class GitService {
   }
 
   /**
+   * `git diff --stat` summary for a revision range (e.g. "v1.0.0..HEAD").
+   * Used for AI changelog context.
+   */
+  async getDiffStat(range: string): Promise<string> {
+    return this.measured('diff', () => this.git.raw(['diff', '--stat', range]));
+  }
+
+  /**
    * Raw `git blame --porcelain` output for a file. Spawn-based via simple-git
    * (no shell, no oversized exec buffer) and instrumented like other reads.
    * @param filePath - Absolute or repo-relative file path
@@ -441,9 +449,12 @@ export class GitService {
     from?: string;
     to?: string;
     author?: string;
-    since?: Date;
-    until?: Date;
+    since?: Date | string;
+    until?: Date | string;
+    grep?: string;
+    pickaxe?: string;
     file?: string;
+    paths?: string[];
   }): Promise<Commit[]> {
     const key = `log:${JSON.stringify(options ?? {})}`;
     return this.cache.getOrFetch(key, 'commits', GitService.TTL_LOG, () =>
@@ -456,9 +467,12 @@ export class GitService {
     from?: string;
     to?: string;
     author?: string;
-    since?: Date;
-    until?: Date;
+    since?: Date | string;
+    until?: Date | string;
+    grep?: string;
+    pickaxe?: string;
     file?: string;
+    paths?: string[];
   }): Promise<Commit[]> {
     logger.debug('Fetching commit history');
     try {
@@ -479,15 +493,27 @@ export class GitService {
       }
 
       if (options?.since) {
-        args.push(`--since=${options.since.toISOString()}`);
+        const since = options.since instanceof Date ? options.since.toISOString() : options.since;
+        args.push(`--since=${since}`);
       }
 
       if (options?.until) {
-        args.push(`--until=${options.until.toISOString()}`);
+        const until = options.until instanceof Date ? options.until.toISOString() : options.until;
+        args.push(`--until=${until}`);
       }
 
-      if (options?.file) {
-        args.push('--', options.file);
+      if (options?.grep) {
+        args.push(`--grep=${options.grep}`, '-i', '--extended-regexp');
+      }
+
+      if (options?.pickaxe) {
+        // -S: commits that changed the number of occurrences of this string
+        args.push(`-S${options.pickaxe}`);
+      }
+
+      const paths = [...(options?.file ? [options.file] : []), ...(options?.paths ?? [])];
+      if (paths.length > 0) {
+        args.push('--', ...paths);
       }
 
       const result = await this.measured('log', () => this.git.raw(args));

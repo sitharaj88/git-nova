@@ -931,6 +931,24 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "gitNova.ai.searchCommits",
+        "title": "GitNova: Search Commits with AI (Natural Language)",
+        "category": "GitNova",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "gitNova.ai.generateChangelog",
+        "title": "GitNova: Generate Changelog / Release Notes (AI)",
+        "category": "GitNova",
+        "icon": "$(book)"
+      },
+      {
+        "command": "gitNova.ai.suggestBranchName",
+        "title": "GitNova: Suggest Branch Name (AI)",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "gitNova.codeLens.toggle",
         "title": "GitNova: Toggle Git CodeLens (Authorship)",
         "category": "GitNova",
