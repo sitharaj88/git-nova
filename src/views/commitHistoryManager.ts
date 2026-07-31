@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
+import { changeAffects } from '../core/refreshScheduler';
 import { logger } from '../utils/logger';
 
 /**
@@ -10,6 +11,8 @@ export class CommitHistoryManager {
   private panel: vscode.WebviewPanel | undefined;
   private disposables: vscode.Disposable[] = [];
   private loadedCount: number = 50;
+  /** Set when a repo event arrives while the panel is hidden; reload on reveal. */
+  private dirty = false;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -425,6 +428,15 @@ export class CommitHistoryManager {
     });
     this.disposables.push(messageDisposable);
 
+    // Catch up on changes that arrived while hidden
+    const viewStateDisposable = this.panel.onDidChangeViewState(e => {
+      if (e.webviewPanel.visible && this.dirty) {
+        this.dirty = false;
+        void this.loadHistory();
+      }
+    });
+    this.disposables.push(viewStateDisposable);
+
     // Handle panel disposal
     const onDidDisposeDisposable = this.panel.onDidDispose(() => {
       this.dispose();
@@ -437,29 +449,40 @@ export class CommitHistoryManager {
    */
   private setupEventListeners(): void {
     // Listen for commit events
-    const commitCreatedDisposable = this.eventBus.on(EventType.CommitCreated, () => {
-      if (this.panel) {
-        this.loadHistory();
-      }
-    });
+    const commitCreatedDisposable = this.eventBus.on(EventType.CommitCreated, () =>
+      this.onRepoEvent()
+    );
     this.disposables.push(commitCreatedDisposable);
 
-    const commitAmendedDisposable = this.eventBus.on(EventType.CommitAmended, () => {
-      if (this.panel) {
-        this.loadHistory();
-      }
-    });
+    const commitAmendedDisposable = this.eventBus.on(EventType.CommitAmended, () =>
+      this.onRepoEvent()
+    );
     this.disposables.push(commitAmendedDisposable);
 
-    // Listen for repository changes
-    const repositoryChangedDisposable = this.eventBus.on(EventType.RepositoryChanged, () => {
-      if (this.panel) {
-        this.loadHistory();
+    // Repository changes: only commit-affecting scopes, and only reload while
+    // the panel is visible — hidden panels catch up on reveal.
+    const repositoryChangedDisposable = this.eventBus.on(
+      EventType.RepositoryChanged,
+      (data: unknown) => {
+        if (changeAffects(data, ['commits', 'branches'])) {
+          this.onRepoEvent();
+        }
       }
-    });
+    );
     this.disposables.push(repositoryChangedDisposable);
 
     logger.debug('CommitHistoryManager event listeners set up');
+  }
+
+  private onRepoEvent(): void {
+    if (!this.panel) {
+      return;
+    }
+    if (!this.panel.visible) {
+      this.dirty = true;
+      return;
+    }
+    void this.loadHistory();
   }
 
   /**

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { logger } from '../utils/logger';
 
 /**
@@ -83,6 +84,7 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
 
   private disposables: vscode.Disposable[] = [];
   private tags: Tag[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -166,9 +168,15 @@ export class TagsProvider implements vscode.TreeDataProvider<TagTreeItem> {
   }
 
   private setupEventListeners(): void {
-    this.disposables.push(this.eventBus.on(EventType.RepositoryChanged, () => this.refresh()));
+    // Tags only change when the 'tags' scope does — status/branch churn no
+    // longer triggers a full tag refetch.
+    this.gate = new ScopedRefreshGate(this.eventBus, ['tags'], () => this.refresh());
+    this.disposables.push(this.gate);
+  }
 
-    this.disposables.push(this.eventBus.on(EventType.BranchSwitched, () => this.refresh()));
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   dispose(): void {
@@ -193,6 +201,7 @@ export function registerTagsProvider(
     showCollapseAll: true,
   });
 
+  provider.attachView(treeView as vscode.TreeView<unknown>);
   context.subscriptions.push(treeView);
   context.subscriptions.push(provider);
 

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { Branch } from '../models/branch';
 import { BranchCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
@@ -137,6 +138,7 @@ export class BranchProvider implements vscode.TreeDataProvider<BranchTreeItem> {
   private localBranches: Branch[] = [];
   private remoteBranches: Branch[] = [];
   private disposables: vscode.Disposable[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -273,28 +275,21 @@ export class BranchProvider implements vscode.TreeDataProvider<BranchTreeItem> {
     );
     this.disposables.push(branchSwitchedDisposable);
 
-    // Listen for repository changes
-    const repositoryChangedDisposable = this.eventBus.on(EventType.RepositoryChanged, () =>
-      this.refresh()
-    );
-    this.disposables.push(repositoryChangedDisposable);
+    // Repository changes, scoped to branch-affecting refreshes and gated on
+    // view visibility.
+    this.gate = new ScopedRefreshGate(this.eventBus, ['branches', 'status'], () => this.refresh());
+    this.disposables.push(this.gate);
 
     // Listen for remote updates
     const remoteUpdatedDisposable = this.eventBus.on(EventType.RemoteUpdated, () => this.refresh());
     this.disposables.push(remoteUpdatedDisposable);
 
-    // Listen for cache invalidation
-    const cacheInvalidatedDisposable = this.eventBus.on(
-      EventType.DiffChanged,
-      (data: { key?: string }) => {
-        if (!data.key || data.key === 'branches') {
-          this.refresh();
-        }
-      }
-    );
-    this.disposables.push(cacheInvalidatedDisposable);
-
     logger.debug('BranchProvider event listeners set up');
+  }
+
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   /**
@@ -331,6 +326,7 @@ export function registerBranchProvider(
     canSelectMany: false,
   });
 
+  branchProvider.attachView(treeView as vscode.TreeView<unknown>);
   context.subscriptions.push(treeView);
   context.subscriptions.push(branchProvider);
 

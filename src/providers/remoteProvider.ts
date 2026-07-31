@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { RemoteCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
 
@@ -74,6 +75,7 @@ export class RemoteProvider implements vscode.TreeDataProvider<RemoteTreeItem> {
 
   private remotes: { name: string; fetchUrl: string; pushUrl: string }[] = [];
   private disposables: vscode.Disposable[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -147,13 +149,16 @@ export class RemoteProvider implements vscode.TreeDataProvider<RemoteTreeItem> {
     const remoteUpdatedDisposable = this.eventBus.on(EventType.RemoteUpdated, () => this.refresh());
     this.disposables.push(remoteUpdatedDisposable);
 
-    // Listen for repository changes
-    const repositoryChangedDisposable = this.eventBus.on(EventType.RepositoryChanged, () =>
-      this.refresh()
-    );
-    this.disposables.push(repositoryChangedDisposable);
+    // Repository changes, scoped and visibility-gated.
+    this.gate = new ScopedRefreshGate(this.eventBus, ['remotes', 'branches'], () => this.refresh());
+    this.disposables.push(this.gate);
 
     logger.debug('RemoteProvider event listeners set up');
+  }
+
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   /**
@@ -190,6 +195,7 @@ export function registerRemoteProvider(
     canSelectMany: false,
   });
 
+  remoteProvider.attachView(treeView as vscode.TreeView<unknown>);
   context.subscriptions.push(treeView);
   context.subscriptions.push(remoteProvider);
 

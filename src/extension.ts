@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from './core/gitService';
 import { RepositoryManager } from './core/repositoryManager';
 import { EventBus, EventType } from './core/eventBus';
+import { RefreshScheduler, ALL_SCOPES } from './core/refreshScheduler';
 import { ConfigManager } from './core/configManager';
 import { registerBranchCommands } from './commands/branch';
 import { registerCommitCommands } from './commands/commit';
@@ -46,6 +47,7 @@ import {
 let gitService: GitService;
 let repositoryManager: RepositoryManager;
 let eventBus: EventBus;
+let refreshScheduler: RefreshScheduler;
 let configManager: ConfigManager;
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -79,6 +81,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Connect RepositoryManager with EventBus
     repositoryManager.setEventBus(eventBus);
+
+    // Single coalesced refresh pipeline — all refresh triggers route through it
+    refreshScheduler = new RefreshScheduler(repositoryManager, eventBus);
+    context.subscriptions.push(refreshScheduler);
 
     // Initialize more enterprise services that depend on gitService
     branchProtectionManager.initialize(context);
@@ -130,7 +136,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerStatusBarItems(context, repositoryManager, eventBus);
 
     // Set up workspace event listeners
-    setupWorkspaceListeners(context, repositoryManager, eventBus);
+    setupWorkspaceListeners(context, repositoryManager, refreshScheduler);
 
     // Set up configuration change listeners (restarts auto-refresh on changes)
     setupConfigListeners(context, configManager, () => setupAutoRefresh());
@@ -555,12 +561,11 @@ function registerGlobalCommands(
   const refreshCommand = vscode.commands.registerCommand('gitNova.refresh', async () => {
     logger.info('Refreshing all views...');
     try {
-      // Trigger repository refresh
-      const activeRepo = repositoryManager.getActiveRepository();
-      if (activeRepo) {
-        await repositoryManager.refreshCache();
+      // Immediate full refresh through the scheduler (one coalesced emit)
+      if (repositoryManager.getActiveRepository()) {
+        await refreshScheduler.flush(ALL_SCOPES);
       }
-      // Emit event to refresh all tree views
+      // DiffChanged kept for diff viewers that re-render open diffs on refresh
       eventBus.emit(EventType.DiffChanged, { key: 'refresh' });
       vscode.window.showInformationMessage('GitNova: Refreshed successfully');
     } catch (error) {
@@ -634,8 +639,7 @@ function registerGlobalCommands(
         async () => {
           await gitService.pull();
           await gitService.push();
-          await repositoryManager.refreshCache();
-          eventBus.emit(EventType.RepositoryChanged, { type: 'sync' });
+          await refreshScheduler.flush(['status', 'branches', 'commits', 'remotes']);
         }
       );
       vscode.window.showInformationMessage('Synced with remote successfully!');
@@ -796,11 +800,12 @@ function setupAutoRefresh(): void {
 
   logger.info(`Setting up auto-refresh with interval: ${refreshInterval}ms`);
 
-  autoRefreshTimer = setInterval(async () => {
+  autoRefreshTimer = setInterval(() => {
     try {
       if (repositoryManager.getActiveRepository()) {
-        await repositoryManager.refreshCache();
-        eventBus.emit(EventType.DiffChanged, { key: 'autoRefresh' });
+        // Cheap scoped request (status only) instead of the old full cache
+        // clear + 5-process refresh + DiffChanged fan-out per tick.
+        refreshScheduler.request(['status', 'operation'], 'autoRefresh');
       }
     } catch (error) {
       logger.error('Auto-refresh failed', error);
@@ -831,6 +836,10 @@ export function getRepositoryManager(): RepositoryManager {
 
 export function getEventBus(): EventBus {
   return eventBus;
+}
+
+export function getRefreshScheduler(): RefreshScheduler {
+  return refreshScheduler;
 }
 
 export function getConfigManager(): ConfigManager {

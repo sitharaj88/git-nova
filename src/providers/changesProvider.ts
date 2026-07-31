@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { GitStatus, StatusFile } from '../models';
 import { FileStatus as ModelFileStatus } from '../models/commit';
 import { toRevisionUri, toEmptyUri } from './revisionContentProvider';
@@ -210,6 +211,7 @@ export class ChangesProvider implements vscode.TreeDataProvider<ChangesTreeItem>
   private readonly STATUS_CACHE_TTL_MS = 500;
   private refreshTimer: NodeJS.Timeout | null = null;
   private readonly REFRESH_DEBOUNCE_MS = 150;
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -409,23 +411,28 @@ export class ChangesProvider implements vscode.TreeDataProvider<ChangesTreeItem>
   private setupEventListeners(): void {
     this.disposables.push(this.eventBus.on(EventType.CommitCreated, () => this.scheduleRefresh()));
 
-    this.disposables.push(
-      this.eventBus.on(EventType.RepositoryChanged, () => this.scheduleRefresh())
+    // Repository changes, scoped to status/operation and visibility-gated.
+    // Note: there is deliberately NO workspace-wide file watcher here — saves
+    // arrive via onDidSaveTextDocument and real repo changes via the .git
+    // watcher, both routed through the RefreshScheduler. The old `**/*`
+    // watcher fired a git status for every file event in the workspace
+    // (builds, npm install, test output).
+    this.gate = new ScopedRefreshGate(this.eventBus, ['status', 'operation'], () =>
+      this.scheduleRefresh()
     );
+    this.disposables.push(this.gate);
 
     this.disposables.push(this.eventBus.on(EventType.StashCreated, () => this.scheduleRefresh()));
 
     this.disposables.push(this.eventBus.on(EventType.StashApplied, () => this.scheduleRefresh()));
-
-    // Watch for file system changes
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
-    this.disposables.push(watcher.onDidChange(() => this.scheduleRefresh()));
-    this.disposables.push(watcher.onDidCreate(() => this.scheduleRefresh()));
-    this.disposables.push(watcher.onDidDelete(() => this.scheduleRefresh()));
-    this.disposables.push(watcher);
   }
 
-  private async getStatus(): Promise<GitStatus> {
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
+  }
+
+  async getStatus(): Promise<GitStatus> {
     const now = Date.now();
 
     if (this.statusCache && now < this.statusCacheExpiry) {
@@ -471,6 +478,8 @@ export function registerChangesProvider(
     showCollapseAll: true,
   });
 
+  provider.attachView(treeView as vscode.TreeView<unknown>);
+
   // Debounced badge update to avoid blocking UI refresh
   let badgeUpdateTimeout: NodeJS.Timeout | undefined;
   const updateBadge = () => {
@@ -486,7 +495,9 @@ export function registerChangesProvider(
           treeView.badge = undefined;
           return;
         }
-        const status = await gitService.getWorkingTreeStatus();
+        // Uses the provider's own TTL/in-flight-deduped status instead of
+        // spawning a second `git status` per refresh.
+        const status = await provider.getStatus();
         // Conflicted files are listed as both staged and unstaged; count them once
         const conflictedPaths = new Set((status.conflicted || []).map(f => f.path));
         const totalChanges =

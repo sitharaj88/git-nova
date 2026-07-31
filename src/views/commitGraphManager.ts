@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
+import { changeAffects } from '../core/refreshScheduler';
 import { autolinkService } from '../services/autolinkService';
 import { logger } from '../utils/logger';
 
@@ -17,6 +18,8 @@ export class CommitGraphManager {
   private panel: vscode.WebviewPanel | undefined;
   private disposables: vscode.Disposable[] = [];
   private maxCount = 200;
+  /** Set when a repo event arrives while the panel is hidden; reload on reveal. */
+  private dirty = false;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -24,11 +27,31 @@ export class CommitGraphManager {
     private eventBus: EventBus
   ) {
     this.disposables.push(
-      this.eventBus.on(EventType.CommitCreated, () => this.panel && this.load()),
-      this.eventBus.on(EventType.BranchSwitched, () => this.panel && this.load()),
-      this.eventBus.on(EventType.RepositoryChanged, () => this.panel && this.load())
+      this.eventBus.on(EventType.CommitCreated, () => this.onRepoEvent()),
+      this.eventBus.on(EventType.BranchSwitched, () => this.onRepoEvent()),
+      this.eventBus.on(EventType.RepositoryChanged, (data: unknown) => {
+        if (changeAffects(data, ['commits', 'branches'])) {
+          this.onRepoEvent();
+        }
+      })
     );
     logger.info('CommitGraphManager initialized');
+  }
+
+  /**
+   * Reload only when the panel is actually visible; hidden panels mark
+   * themselves dirty and catch up on reveal instead of re-running
+   * `git log --all` for every background change.
+   */
+  private onRepoEvent(): void {
+    if (!this.panel) {
+      return;
+    }
+    if (!this.panel.visible) {
+      this.dirty = true;
+      return;
+    }
+    void this.load();
   }
 
   async show(): Promise<void> {
@@ -134,6 +157,12 @@ export class CommitGraphManager {
           case 'explain':
             await vscode.commands.executeCommand('gitNova.ai.explainCommit', msg.hash);
             break;
+        }
+      }),
+      this.panel.onDidChangeViewState(e => {
+        if (e.webviewPanel.visible && this.dirty) {
+          this.dirty = false;
+          void this.load();
         }
       }),
       this.panel.onDidDispose(() => this.dispose())

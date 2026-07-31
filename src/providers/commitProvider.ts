@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { Commit, CommitFile, FileStatus } from '../models/commit';
 import { CommitCommands } from '../constants/commands';
 import { toRevisionUri } from './revisionContentProvider';
@@ -116,6 +117,7 @@ export class CommitProvider implements vscode.TreeDataProvider<CommitTreeItem> {
 
   private commits: Commit[] = [];
   private disposables: vscode.Disposable[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -207,17 +209,18 @@ export class CommitProvider implements vscode.TreeDataProvider<CommitTreeItem> {
     const commitAmendedDisposable = this.eventBus.on(EventType.CommitAmended, () => this.refresh());
     this.disposables.push(commitAmendedDisposable);
 
-    // Listen for repository changes
-    const repositoryChangedDisposable = this.eventBus.on(EventType.RepositoryChanged, () =>
-      this.refresh()
-    );
-    this.disposables.push(repositoryChangedDisposable);
-
-    // Listen for diff changes
-    const diffChangedDisposable = this.eventBus.on(EventType.DiffChanged, () => this.refresh());
-    this.disposables.push(diffChangedDisposable);
+    // Repository changes, scoped to commit-affecting refreshes and gated on
+    // view visibility. (Replaces the old unconditional RepositoryChanged +
+    // DiffChanged double subscription.)
+    this.gate = new ScopedRefreshGate(this.eventBus, ['commits', 'branches'], () => this.refresh());
+    this.disposables.push(this.gate);
 
     logger.debug('CommitProvider event listeners set up');
+  }
+
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   /**
@@ -254,6 +257,7 @@ export function registerCommitProvider(
     canSelectMany: false,
   });
 
+  commitProvider.attachView(treeView as vscode.TreeView<unknown>);
   context.subscriptions.push(treeView);
   context.subscriptions.push(commitProvider);
 

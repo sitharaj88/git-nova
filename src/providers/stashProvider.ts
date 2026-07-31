@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
-import { EventBus, EventType } from '../core/eventBus';
+import { EventBus } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { Stash } from '../models/stash';
 import { StashCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
@@ -79,6 +80,7 @@ export class StashProvider implements vscode.TreeDataProvider<StashTreeItem> {
 
   private stashes: Stash[] = [];
   private disposables: vscode.Disposable[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -145,19 +147,15 @@ export class StashProvider implements vscode.TreeDataProvider<StashTreeItem> {
    * Set up event listeners for automatic refresh
    */
   private setupEventListeners(): void {
-    // Listen for stash events
-    const stashCreatedDisposable = this.eventBus.on(EventType.RepositoryChanged, () =>
-      this.refresh()
-    );
-    this.disposables.push(stashCreatedDisposable);
-
-    // Listen for repository changes
-    const repositoryChangedDisposable = this.eventBus.on(EventType.RepositoryChanged, () =>
-      this.refresh()
-    );
-    this.disposables.push(repositoryChangedDisposable);
+    this.gate = new ScopedRefreshGate(this.eventBus, ['stashes'], () => this.refresh());
+    this.disposables.push(this.gate);
 
     logger.debug('StashProvider event listeners set up');
+  }
+
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   /**
@@ -194,6 +192,7 @@ export function registerStashProvider(
     canSelectMany: false,
   });
 
+  stashProvider.attachView(treeView as vscode.TreeView<unknown>);
   context.subscriptions.push(treeView);
   context.subscriptions.push(stashProvider);
 

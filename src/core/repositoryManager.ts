@@ -39,7 +39,6 @@ export class RepositoryManager {
   private repositoryState: RepositoryState | null = null;
   private operationState: GitOperationState = { type: null };
   private eventBus: EventBus | null = null;
-  private refreshTimers: Map<string, any> = new Map();
   private readonly DEFAULT_TTL = 60000; // 1 minute
 
   constructor(private gitService: GitService) {
@@ -163,11 +162,6 @@ export class RepositoryManager {
         await Promise.all([this.refreshStatus(), this.refreshBranches(), this.refreshRemotes()]);
       }
 
-      // Emit cache invalidated event
-      if (this.eventBus) {
-        this.eventBus.emit(EventType.DiffChanged, { key });
-      }
-
       logger.debug('Cache refreshed successfully');
     } catch (error) {
       logger.error('Failed to refresh cache', error);
@@ -235,11 +229,6 @@ export class RepositoryManager {
       this.cache.delete(key);
       logger.debug(`Invalidated cache key: ${key}`);
     }
-
-    // Emit cache invalidated event
-    if (this.eventBus) {
-      this.eventBus.emit(EventType.DiffChanged, { key });
-    }
   }
 
   /**
@@ -261,8 +250,16 @@ export class RepositoryManager {
       return new vscode.Disposable(() => {});
     }
 
-    const disposable = this.eventBus.on(EventType.RepositoryChanged, (repo: IGitRepository) => {
-      callback(repo);
+    const disposable = this.eventBus.on(EventType.RepositoryChanged, (data: unknown) => {
+      // Payload may be the scheduler's { repo, scopes } envelope or a legacy
+      // bare repository object from a command emit.
+      const repo =
+        data && typeof data === 'object' && 'repo' in data && 'scopes' in data
+          ? ((data as { repo: IGitRepository | null }).repo ?? this.getActiveRepository())
+          : (data as IGitRepository);
+      if (repo) {
+        callback(repo);
+      }
     });
 
     logger.debug('Subscribed to repository changes');
@@ -291,40 +288,23 @@ export class RepositoryManager {
   }
 
   /**
-   * Schedule a cache refresh
-   * @param key - Cache key to refresh
-   * @param delay - Delay in milliseconds
+   * Refresh manager-held state for the given scopes. Called by the
+   * RefreshScheduler before it emits the single RepositoryChanged event.
+   * Scopes without manager-side state (tags/stashes/commits) are no-ops here —
+   * their providers fetch from GitService directly.
    */
-  scheduleRefresh(key: string, delay: number): void {
-    // Clear existing timer for this key
-    const existingTimer = this.refreshTimers.get(key);
-    if (existingTimer) {
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
+  async refreshForScopes(scopes: ReadonlySet<string>): Promise<void> {
+    const work: Promise<void>[] = [];
+    if (scopes.has('status') || scopes.has('operation')) {
+      work.push(this.refreshStatus());
     }
-
-    // Schedule new refresh
-    const timer = setTimeout(() => {
-      this.refreshCache(key);
-      this.refreshTimers.delete(key);
-    }, delay);
-
-    this.refreshTimers.set(key, timer);
-    logger.debug(`Scheduled refresh for key: ${key} in ${delay}ms`);
-  }
-
-  /**
-   * Cancel scheduled refresh for a key
-   * @param key - Cache key
-   */
-  cancelRefresh(key: string): void {
-    const timer = this.refreshTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      this.refreshTimers.delete(key);
-      logger.debug(`Cancelled refresh for key: ${key}`);
+    if (scopes.has('branches')) {
+      work.push(this.refreshBranches());
     }
+    if (scopes.has('remotes')) {
+      work.push(this.refreshRemotes());
+    }
+    await Promise.all(work);
   }
 
   /**
@@ -349,14 +329,11 @@ export class RepositoryManager {
       this.repositoryState.isRebasing = this.operationState.type === 'rebase';
       this.repositoryState.isMerging = this.operationState.type === 'merge';
 
-      // Cache the status
+      // Cache the status. Note: this method no longer emits RepositoryChanged —
+      // the RefreshScheduler is the single emitter, so one save no longer
+      // produces two full provider fan-outs.
       this.setCache('status', status);
       this.setCache('currentBranch', currentBranch);
-
-      // Emit repository changed event
-      if (this.eventBus) {
-        this.eventBus.emit(EventType.RepositoryChanged, this.getActiveRepository());
-      }
 
       logger.debug('Repository status refreshed');
     } catch (error) {
@@ -469,12 +446,6 @@ export class RepositoryManager {
    */
   dispose(): void {
     logger.info('RepositoryManager disposing');
-
-    // Clear all timers
-    for (const timer of this.refreshTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.refreshTimers.clear();
 
     // Clear cache
     this.cache.clear();

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
+import { ScopedRefreshGate } from './scopedRefresh';
 import { logger } from '../utils/logger';
 
 /**
@@ -129,6 +130,7 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private disposables: vscode.Disposable[] = [];
+  private gate: ScopedRefreshGate | undefined;
 
   constructor(
     private gitService: GitService,
@@ -212,11 +214,19 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
     // Listen to commit changes
     this.disposables.push(this.eventBus.on(EventType.CommitCreated, () => this.refresh()));
 
-    // Listen to repository changes
-    this.disposables.push(this.eventBus.on(EventType.RepositoryChanged, () => this.refresh()));
+    // Repository changes, scoped and visibility-gated.
+    this.gate = new ScopedRefreshGate(this.eventBus, ['status', 'operation', 'commits'], () =>
+      this.refresh()
+    );
+    this.disposables.push(this.gate);
 
     // Listen to stash changes
     this.disposables.push(this.eventBus.on(EventType.StashCreated, () => this.refresh()));
+  }
+
+  /** Gate refreshes on the view's visibility. */
+  attachView(view: vscode.TreeView<unknown>): void {
+    this.gate?.attachView(view);
   }
 
   dispose(): void {
@@ -240,6 +250,8 @@ export function registerSourceControlProvider(
     treeDataProvider: provider,
     showCollapseAll: false,
   });
+
+  provider.attachView(treeView as vscode.TreeView<unknown>);
 
   // Set context for welcome view
   const updateContext = async () => {
