@@ -222,12 +222,19 @@ ${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
   .graph { flex: 1; overflow: auto; }
   .details { width: 360px; border-left: 1px solid var(--vscode-panel-border); overflow: auto; padding: 14px; display: none; }
   .details.show { display: block; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4)); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }
   table.rows { width: 100%; border-collapse: collapse; }
-  .row { cursor: pointer; }
+  .row { cursor: pointer; height: 24px; }
   .row:hover { background: var(--vscode-list-hoverBackground); }
   .row.sel { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-  .row td { padding: 3px 6px; white-space: nowrap; vertical-align: middle; }
-  .gcell { width: 1px; padding-right: 0 !important; }
+  .row td { padding: 0 6px; white-space: nowrap; vertical-align: middle; }
+  /* Zero vertical padding so each row's rail SVG touches the next — the
+     graph lines must read as continuous rails, not dashes. */
+  .gcell { width: 1px; padding: 0 !important; }
+  .rail { display: block; }
   .subject { width: 100%; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
   .meta { color: var(--vscode-descriptionForeground); font-size: 11px; }
   .hashc { font-family: monospace; font-size: 11px; color: var(--vscode-descriptionForeground); }
@@ -301,43 +308,90 @@ ${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
 
     function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
 
-    // Assign a lane to each commit (simple parent-following layout).
-    function computeLanes(list) {
-      const lanes = [];          // active lane -> expected next hash
-      const pos = {};            // hash -> {lane, color}
-      list.forEach(c => {
+    /**
+     * Lane layout WITH edge information so the graph renders real rails:
+     * per row we record the commit's lane, lanes merging into it, lanes it
+     * spawns (extra parents), pass-through lanes, and whether it's a tip.
+     */
+    function computeGraph(list) {
+      const lanes = [];   // lane index -> expected next hash (null = free)
+      const rows = [];
+      let maxLane = 1;
+      for (const c of list) {
+        const before = lanes.slice();
         let lane = lanes.indexOf(c.hash);
-        if (lane === -1) {
+        const isTip = lane === -1;
+        if (isTip) {
           lane = lanes.indexOf(null);
           if (lane === -1) { lane = lanes.length; lanes.push(null); }
         }
-        pos[c.hash] = { lane, color: COLORS[lane % COLORS.length] };
-        // first parent continues this lane; extra parents claim new lanes
+        // Other lanes waiting for this same commit merge into it here.
+        const merging = [];
+        for (let k = 0; k < lanes.length; k++) {
+          if (k !== lane && lanes[k] === c.hash) { merging.push(k); lanes[k] = null; }
+        }
+        // First parent continues this lane; extra parents fork new lanes.
+        const spawned = [];
         if (c.parents.length) {
           lanes[lane] = c.parents[0];
-          for (let k=1;k<c.parents.length;k++){
-            let l = lanes.indexOf(null);
-            if (l===-1){ l=lanes.length; lanes.push(c.parents[k]); } else lanes[l]=c.parents[k];
+          for (let p = 1; p < c.parents.length; p++) {
+            let k = lanes.indexOf(null);
+            if (k === -1) { k = lanes.length; lanes.push(c.parents[p]); } else { lanes[k] = c.parents[p]; }
+            spawned.push(k);
           }
         } else {
           lanes[lane] = null;
         }
-      });
-      const maxLane = Math.max(1, ...Object.values(pos).map(p=>p.lane+1));
-      return { pos, maxLane };
+        // Unrelated lanes that are active across this row.
+        const pass = [];
+        for (let k = 0; k < before.length; k++) {
+          if (before[k] && k !== lane && merging.indexOf(k) === -1) pass.push(k);
+        }
+        rows.push({ lane, isTip, merging, spawned, pass, hasParent: c.parents.length > 0 });
+        maxLane = Math.max(maxLane, lane + 1, lanes.length);
+      }
+      return { rows, maxLane };
+    }
+
+    const laneColor = k => COLORS[k % COLORS.length];
+    const cx = k => k * LANE_W + LANE_W / 2;
+
+    /** SVG for one row: pass-through rails, merge/fork curves, commit dot. */
+    function rowSvg(r, gw) {
+      const H = ROW_H, cy = H / 2, L = cx(r.lane);
+      let s = '<svg width="' + gw + '" height="' + H + '" class="rail">';
+      const stroke = (d, k) =>
+        '<path d="' + d + '" fill="none" stroke="' + laneColor(k) + '" stroke-width="2"/>';
+      // Unrelated lanes flow straight through
+      for (const k of r.pass) s += stroke('M' + cx(k) + ',0 V' + H, k);
+      // Lanes merging into this commit: down, then rounded elbow into the dot
+      for (const k of r.merging) {
+        const x = cx(k), dir = x < L ? 1 : -1;
+        s += stroke('M' + x + ',0 V' + (cy - 6) + ' Q' + x + ',' + cy + ' ' + (x + 6 * dir) + ',' + cy + ' H' + L, k);
+      }
+      // Lanes spawned by extra parents: out of the dot, rounded elbow, then down
+      for (const k of r.spawned) {
+        const x = cx(k), dir = x < L ? -1 : 1;
+        s += stroke('M' + L + ',' + cy + ' H' + (x - 6 * dir) + ' Q' + x + ',' + cy + ' ' + x + ',' + (cy + 6) + ' V' + H, k);
+      }
+      // The commit's own lane: incoming from above (unless a branch tip),
+      // outgoing below (unless a root commit)
+      if (!r.isTip) s += stroke('M' + L + ',0 V' + cy, r.lane);
+      if (r.hasParent) s += stroke('M' + L + ',' + cy + ' V' + H, r.lane);
+      // Dot on top of the rails
+      s += '<circle cx="' + L + '" cy="' + cy + '" r="' + DOT_R + '" fill="' + laneColor(r.lane) +
+        '" stroke="var(--vscode-editor-background)" stroke-width="1.5"/>';
+      return s + '</svg>';
     }
 
     function renderRows() {
       if (!all.length) { graphEl.innerHTML = '<div class="empty">No commits.</div>'; return; }
 
-      const { pos, maxLane } = computeLanes(all);
-      const gw = (maxLane+1) * LANE_W;
+      const g = computeGraph(all);
+      const gw = (g.maxLane + 1) * LANE_W;
 
       let rows = '<table class="rows"><tbody>';
-      all.forEach(c => {
-        const p = pos[c.hash] || {lane:0,color:COLORS[0]};
-        const dot = '<svg width="'+gw+'" height="'+ROW_H+'">' +
-          '<circle cx="'+(p.lane*LANE_W + LANE_W/2)+'" cy="'+(ROW_H/2)+'" r="'+DOT_R+'" fill="'+p.color+'"/></svg>';
+      all.forEach((c, i) => {
         let badges = (c.refs||[]).map(r => {
           const isHead = head && (r === head);
           const isTag = r.startsWith('tag:');
@@ -346,7 +400,7 @@ ${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
         }).join('');
         const searchKey = esc((c.subject+' '+c.author+' '+c.hash).toLowerCase());
         rows += '<tr class="row'+(selected===c.hash?' sel':'')+'" data-hash="'+c.hash+'" data-search="'+searchKey+'">' +
-          '<td class="gcell">'+dot+'</td>' +
+          '<td class="gcell">'+rowSvg(g.rows[i], gw)+'</td>' +
           '<td class="subject">'+badges+esc(c.subject)+'</td>' +
           '<td class="meta">'+esc(c.author)+'</td>' +
           '<td class="meta">'+rel(c.date)+'</td>' +

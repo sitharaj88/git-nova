@@ -32,13 +32,22 @@ ${cspMeta(webview, nonce)}
     background: ${compact ? 'transparent' : 'var(--vscode-editor-background)'};
     font-size: ${compact ? '12.5px' : '13.5px'}; margin: 0; display: flex; flex-direction: column; }
 
+  /* Slim, themed scrollbars (default webview scrollbars are wide and clunky) */
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4));
+    border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
   /* ---------- Header ---------- */
   #header { display: flex; align-items: center; gap: 8px; padding: ${compact ? '6px 10px' : '10px 16px'};
     border-bottom: 1px solid var(--vscode-panel-border); }
   #title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .iconbtn { background: none; border: none; color: var(--vscode-foreground); cursor: pointer;
-    padding: 3px 6px; border-radius: 4px; font-size: 14px; line-height: 1;
+    padding: 4px 6px; border-radius: 4px; line-height: 0; display: inline-flex; align-items: center;
     transition: background .12s ease, transform .12s ease; }
+  .iconbtn svg { display: block; }
   .iconbtn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08)); transform: scale(1.08); }
   .iconbtn:active { transform: scale(0.94); }
 
@@ -174,15 +183,24 @@ ${cspMeta(webview, nonce)}
   #model:hover { color: var(--vscode-textLink-foreground); }
   label.ctx { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
   #footer .spacer { flex: 1; }
-  #hint .dots span { width: 4px; height: 4px; }
 </style>
 </head>
 <body>
   <div id="header">
     <span id="title">New chat</span>
-    <button class="iconbtn" id="newChat" title="New chat">＋</button>
-    <button class="iconbtn" id="history" title="Chat history">🕘</button>
-    ${compact ? '<button class="iconbtn" id="openPanel" title="Open as editor panel">⧉</button>' : ''}
+    <button class="iconbtn" id="newChat" title="New chat">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+    </button>
+    <button class="iconbtn" id="history" title="Chat history">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.1 6.4A5.2 5.2 0 1 1 2.8 9"/><path d="M2.2 5.2l.9 1.9 2-.6"/><path d="M8 5.2V8.2l2.1 1.3"/></svg>
+    </button>
+    ${
+      compact
+        ? `<button class="iconbtn" id="openPanel" title="Open as editor panel">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M6.5 9.5l3.5-3.5M7.5 6h2.5v2.5"/></svg>
+    </button>`
+        : ''
+    }
   </div>
   <div id="scroll">
     <div id="messages"></div>
@@ -577,7 +595,8 @@ ${cspMeta(webview, nonce)}
       busy = b;
       stopBtn.hidden = !b;
       sendBtn.disabled = b;
-      hintEl.innerHTML = b ? THINKING : '';
+      // No footer animation — the thinking indicator lives in the chat bubble only.
+      hintEl.textContent = '';
       if (!b && streamEl) { streamEnded = true; schedulePump(); }
     }
 
