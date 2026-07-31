@@ -76,28 +76,28 @@ export class RepoHealthManager {
       return;
     }
     try {
-      const text = await vscode.window.withProgress(
+      // Stream chunks into the webview so the analysis renders progressively.
+      const cts = new vscode.CancellationTokenSource();
+      const messages = [
         {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Repo Doctor: AI analysis…',
-          cancellable: true,
+          role: 'system' as const,
+          content:
+            'You are a Git repository maintenance expert. Given the health metrics, give ' +
+            'a short prioritized action plan (max 6 bullets) to keep the repo healthy and ' +
+            'fast. Be specific and practical. Use Markdown.',
         },
-        (_p, token) =>
-          aiService.complete(
-            [
-              {
-                role: 'system',
-                content:
-                  'You are a Git repository maintenance expert. Given the health metrics, give ' +
-                  'a short prioritized action plan (max 6 bullets) to keep the repo healthy and ' +
-                  'fast. Be specific and practical. Use Markdown.',
-              },
-              { role: 'user', content: `Repository health metrics:\n\n${reportToContext(report)}` },
-            ],
-            token
-          )
-      );
-      this.panel.webview.postMessage({ command: 'aiResult', text });
+        {
+          role: 'user' as const,
+          content: `Repository health metrics:\n\n${reportToContext(report)}`,
+        },
+      ];
+      let text = '';
+      this.panel.webview.postMessage({ command: 'aiResult', text: '…' });
+      for await (const chunk of aiService.stream(messages, cts.token)) {
+        text += chunk;
+        this.panel.webview.postMessage({ command: 'aiResult', text });
+      }
+      this.panel.webview.postMessage({ command: 'aiResult', text: text || '(empty response)' });
     } catch (error) {
       this.panel.webview.postMessage({
         command: 'aiResult',

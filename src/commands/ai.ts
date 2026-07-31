@@ -13,6 +13,7 @@ import {
   stripCodeFence,
 } from '../services/aiService';
 import { AiCommands } from '../constants/commands';
+import { aiOutputPanel } from '../views/aiOutputPanel';
 import { logger } from '../utils/logger';
 
 /** Scheme + in-memory store for AI-proposed conflict resolutions (diff preview). */
@@ -206,16 +207,9 @@ async function handleReviewChanges(gitService: GitService): Promise<void> {
 
     const lintFindings = collectLintFindings();
 
-    const review = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: 'GitNova: Reviewing changes with AI…',
-        cancellable: true,
-      },
-      (_p, token) => aiService.complete(buildReviewPrompt(diff, lintFindings), token)
+    await aiOutputPanel.run('AI Code Review', token =>
+      aiService.stream(buildReviewPrompt(diff, lintFindings), token)
     );
-
-    await showMarkdown(`# GitNova — AI Code Review\n\n${review}`);
   } catch (error) {
     logger.error('Failed to review changes', error);
     vscode.window.showErrorMessage(`GitNova AI: ${error instanceof Error ? error.message : error}`);
@@ -380,23 +374,16 @@ async function handleExplainCommit(arg: unknown, gitService: GitService): Promis
       return;
     }
 
-    const explanation = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: 'GitNova: Explaining commit…',
-        cancellable: true,
-      },
-      (_progress, token) =>
-        aiService.complete(
-          buildExplainPrompt(diff, {
-            subject: detail?.message?.split('\n')[0],
-            author: detail?.author?.name,
-          }),
-          token
-        )
+    // Streams into the shared GitNova AI panel — no spinner-then-dump.
+    await aiOutputPanel.run(`Explanation of ${hash.substring(0, 8)}`, token =>
+      aiService.stream(
+        buildExplainPrompt(diff, {
+          subject: detail?.message?.split('\n')[0],
+          author: detail?.author?.name,
+        }),
+        token
+      )
     );
-
-    await showMarkdown(`# GitNova — Explanation of \`${hash.substring(0, 8)}\`\n\n${explanation}`);
   } catch (error) {
     logger.error('Failed to explain commit', error);
     vscode.window.showErrorMessage(`GitNova AI: ${error instanceof Error ? error.message : error}`);
@@ -421,16 +408,9 @@ async function handleExplainChanges(gitService: GitService): Promise<void> {
       return;
     }
 
-    const explanation = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: 'GitNova: Explaining changes…',
-        cancellable: true,
-      },
-      (_progress, token) => aiService.complete(buildExplainPrompt(diff), token)
+    await aiOutputPanel.run('Explanation of current changes', token =>
+      aiService.stream(buildExplainPrompt(diff), token)
     );
-
-    await showMarkdown(`# GitNova — Explanation of current changes\n\n${explanation}`);
   } catch (error) {
     logger.error('Failed to explain changes', error);
     vscode.window.showErrorMessage(`GitNova AI: ${error instanceof Error ? error.message : error}`);
@@ -461,8 +441,4 @@ async function resolveCommitHash(arg: unknown): Promise<string | undefined> {
   });
 }
 
-/** Render Markdown text in a preview tab. */
-async function showMarkdown(content: string): Promise<void> {
-  const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
-  await vscode.commands.executeCommand('markdown.showPreview', doc.uri);
-}
+// Markdown results now stream into the shared aiOutputPanel (views/aiOutputPanel.ts).

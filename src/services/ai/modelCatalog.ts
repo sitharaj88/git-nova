@@ -94,7 +94,7 @@ export const COMPATIBLE_PRESETS: CompatiblePreset[] = [
     label: 'Zhipu GLM (Z.ai)',
     // International endpoint; mainland China users can pick "Custom endpoint"
     // and enter https://open.bigmodel.cn/api/paas/v4 instead.
-    baseUrl: 'https://api.z.ai/api/paas/v4',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
     models: ['glm-4.6', 'glm-4.5', 'glm-4.5-air'],
     supportsModelList: true,
   },
