@@ -1070,6 +1070,13 @@
           "name": "Pull Requests & Issues",
           "icon": "$(git-pull-request)",
           "contextualTitle": "GitNova"
+        },
+        {
+          "type": "webview",
+          "id": "gitNova.aiChat",
+          "name": "AI Assistant",
+          "icon": "$(sparkle)",
+          "contextualTitle": "GitNova AI"
         }
       ]
     },

@@ -9,6 +9,7 @@ import { InteractiveRebaseManager } from './interactiveRebaseManager';
 import { LaunchpadManager } from './launchpadManager';
 import { RepoHealthManager } from './repoHealthManager';
 import { AiReviewManager } from './aiReviewManager';
+import { AiChatViewProvider } from './aiChatViewProvider';
 import { createRepoHealthService } from '../services/repoHealthService';
 import { AiCommands, DiffCommands, RebaseCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
@@ -85,7 +86,13 @@ export function registerWebviews(
     // Structured AI code review panel (findings with jump-to-line + apply)
     vscode.commands.registerCommand(AiCommands.Review, async () => {
       await getAiReviewManager().review();
-    })
+    }),
+    // Repo chat sidebar. The provider is cheap until the view is first opened;
+    // registration itself must happen at activation for VS Code to resolve it.
+    vscode.window.registerWebviewViewProvider(
+      AiChatViewProvider.viewId,
+      new AiChatViewProvider(gitService, repositoryManager)
+    )
   );
 
   logger.info('Webviews registered (lazy)');
