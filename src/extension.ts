@@ -59,11 +59,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   logger.info('GitNova is activating...');
 
   const activationTimer = logger.startTimer('Extension Activation');
+  // Recorded via performanceMonitor so `extension.activation` appears in the
+  // performance report (gitNova.enterprise.showPerformance), not just the log.
+  let activationMetric: vscode.Disposable | null = null;
 
   try {
     // Initialize enterprise services
     telemetryService.initialize(context);
     performanceMonitor.initialize(context);
+    activationMetric = performanceMonitor.createTimer('extension.activation');
+    workspaceStateManager.initialize(context);
     workspaceStateManager.initialize(context);
 
     // Initialize core services
@@ -154,6 +159,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     throw error;
   } finally {
+    activationMetric?.dispose();
     activationTimer.dispose();
   }
 }

@@ -17,6 +17,7 @@ import {
   Remote,
 } from '../models';
 import { logger } from '../utils/logger';
+import { performanceMonitor } from '../services/performanceMonitor';
 
 /**
  * Custom error class for Git operations
@@ -118,6 +119,17 @@ export class GitService {
   }
 
   /**
+   * Run a git process under performance measurement. Records duration under
+   * `git.<op>` (matching performanceMonitor's built-in thresholds) and counts
+   * every spawn under the `git.process` counter so process-per-action metrics
+   * are observable via the perf report.
+   */
+  private measured<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    performanceMonitor.incrementCounter('git.process', 1, { op });
+    return performanceMonitor.measureAsync(`git.${op}`, fn);
+  }
+
+  /**
    * Initialize a new git repository
    * @param path - Path to the repository
    */
@@ -198,7 +210,7 @@ export class GitService {
   async getWorkingTreeStatus(): Promise<GitStatus> {
     logger.debug('Fetching working tree status');
     try {
-      const status: StatusResult = await this.git.status();
+      const status: StatusResult = await this.measured('status', () => this.git.status());
 
       const files: StatusFile[] = status.files.map((file: any) => ({
         path: file.path,
@@ -408,7 +420,7 @@ export class GitService {
         args.push('--', options.file);
       }
 
-      const result = await this.git.raw(args);
+      const result = await this.measured('log', () => this.git.raw(args));
       const lines = result
         .trim()
         .split('\n')
@@ -457,13 +469,15 @@ export class GitService {
     logger.debug('Fetching commit graph');
     const SEP = '\x1f';
     try {
-      const result = await this.git.raw([
-        'log',
-        '--all',
-        '--date-order',
-        `--max-count=${maxCount}`,
-        `--pretty=format:%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%D${SEP}%s`,
-      ]);
+      const result = await this.measured('log', () =>
+        this.git.raw([
+          'log',
+          '--all',
+          '--date-order',
+          `--max-count=${maxCount}`,
+          `--pretty=format:%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%D${SEP}%s`,
+        ])
+      );
 
       const commits: Commit[] = [];
       for (const line of result.split('\n').filter(l => l.trim())) {
@@ -506,17 +520,23 @@ export class GitService {
     try {
       // 1) Metadata only (no diff). Body is last so embedded newlines don't
       //    interfere with the other fields.
-      const metaOut = await this.git.show([
-        '-s',
-        `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s${SEP}%b`,
-        hash,
-      ]);
+      const metaOut = await this.measured('show', () =>
+        this.git.show([
+          '-s',
+          `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s${SEP}%b`,
+          hash,
+        ])
+      );
       const metaParts = metaOut.split(SEP);
 
       // 2) Per-file line stats (machine-readable): "<add>\t<del>\t<path>".
-      const numOut = await this.git.show([hash, '--numstat', '--format=']);
+      const numOut = await this.measured('show', () =>
+        this.git.show([hash, '--numstat', '--format='])
+      );
       // 3) Per-file status letters: "<STATUS>\t<path>" (R/C carry old + new).
-      const nameOut = await this.git.show([hash, '--name-status', '--format=']);
+      const nameOut = await this.measured('show', () =>
+        this.git.show([hash, '--name-status', '--format='])
+      );
 
       // Build a path -> status map from --name-status.
       const statusMap = new Map<string, FileStatus>();
@@ -854,7 +874,7 @@ export class GitService {
   async getCurrentBranch(): Promise<Branch> {
     logger.debug('Fetching current branch');
     try {
-      const branches = await this.git.branch();
+      const branches = await this.measured('branches', () => this.git.branch());
       const currentBranchName = branches.current;
 
       if (!currentBranchName) {
@@ -899,7 +919,7 @@ export class GitService {
   async getLocalBranches(): Promise<Branch[]> {
     logger.debug('Fetching local branches');
     try {
-      const branches = await this.git.branch();
+      const branches = await this.measured('branches', () => this.git.branch());
       const localBranches: Branch[] = [];
 
       for (const [name, branchData] of Object.entries(branches.branches)) {
@@ -945,7 +965,7 @@ export class GitService {
   async getRemoteBranches(): Promise<Branch[]> {
     logger.debug('Fetching remote branches');
     try {
-      const branches = await this.git.branch(['-r']);
+      const branches = await this.measured('branches', () => this.git.branch(['-r']));
       const remoteBranches: Branch[] = [];
 
       for (const [name, branchData] of Object.entries(branches.branches)) {
@@ -1376,7 +1396,7 @@ export class GitService {
     }
     logger.debug(`Fetching raw diff: ${args.join(' ') || '(working tree)'}`);
     try {
-      return await this.git.diff(args);
+      return await this.measured('diff', () => this.git.diff(args));
     } catch (error) {
       logger.error('Failed to fetch raw diff', error);
       throw new GitError(`Failed to fetch raw diff: ${error}`, 'diff', undefined, String(error));
@@ -1392,7 +1412,7 @@ export class GitService {
     logger.debug(`Fetching commit diff: ${hash}`);
     try {
       // `<hash>^!` expands to `<hash>^ <hash>`, i.e. the changes of this commit only.
-      return await this.git.diff([`${hash}^!`]);
+      return await this.measured('diff', () => this.git.diff([`${hash}^!`]));
     } catch (error) {
       // Root commits have no parent; fall back to diffing against the empty tree.
       logger.debug(`Commit diff fallback for ${hash} (likely root commit)`);
@@ -1637,7 +1657,7 @@ export class GitService {
   async getStashes(): Promise<Stash[]> {
     logger.debug('Fetching stashes');
     try {
-      const result = await this.git.stashList();
+      const result = await this.measured('stash', () => this.git.stashList());
       const stashes: Stash[] = [];
 
       for (const stash of result.all) {
@@ -2246,7 +2266,7 @@ export class GitService {
   async getRemotes(): Promise<Remote[]> {
     logger.debug('Fetching remotes');
     try {
-      const result = await this.git.getRemotes(true);
+      const result = await this.measured('remotes', () => this.git.getRemotes(true));
       const remotes: Remote[] = result.map(remote => ({
         name: remote.name,
         fetchUrl: remote.refs.fetch || '',
@@ -2335,7 +2355,7 @@ export class GitService {
   > {
     logger.debug('Fetching tags');
     try {
-      const result = await this.git.tags();
+      const result = await this.measured('tags', () => this.git.tags());
       const tags: {
         name: string;
         hash: string;
