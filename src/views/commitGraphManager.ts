@@ -222,7 +222,8 @@ ${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
   .graph { flex: 1; overflow: auto; }
   .details { width: 360px; border-left: 1px solid var(--vscode-panel-border); overflow: auto; padding: 14px; display: none; }
   .details.show { display: block; }
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4)); border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }

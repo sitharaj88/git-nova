@@ -135,6 +135,11 @@ ${cspMeta(webview, nonce)}
 <title>GitNova AI</title>
 <style>
   * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.35)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.6)); }
   body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground);
     background: var(--vscode-editor-background); font-size: 13px; margin: 0; padding: 0 0 40px 0; }
   .toolbar { position: sticky; top: 0; display: flex; gap: 8px; align-items: center;

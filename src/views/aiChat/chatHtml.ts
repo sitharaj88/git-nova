@@ -30,14 +30,18 @@ ${cspMeta(webview, nonce)}
   html, body { height: 100%; }
   body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground);
     background: ${compact ? 'transparent' : 'var(--vscode-editor-background)'};
-    font-size: ${compact ? '12.5px' : '13.5px'}; margin: 0; display: flex; flex-direction: column; }
+    font-size: ${compact ? '12.5px' : '13.5px'}; margin: 0; display: flex; flex-direction: column;
+    overflow: hidden; /* one scroll region only (#scroll) — never a second page scrollbar */ }
 
-  /* Slim, themed scrollbars (default webview scrollbars are wide and clunky) */
-  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  /* Slim, themed scrollbars. The arrow buttons MUST be removed explicitly —
+     they are what forces the wide native track in webviews. */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4));
-    border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.7)); }
+  ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.35));
+    border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.6)); }
+  ::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground, rgba(100,100,100,0.8)); }
   ::-webkit-scrollbar-corner { background: transparent; }
 
   /* ---------- Header ---------- */
@@ -167,7 +171,8 @@ ${cspMeta(webview, nonce)}
     box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
   textarea { flex: 1; resize: none; background: none; border: none; outline: none;
     color: var(--vscode-input-foreground); font-family: inherit; font-size: inherit;
-    line-height: 1.5; max-height: 160px; }
+    line-height: 1.5; max-height: 160px; scrollbar-width: none; }
+  textarea::-webkit-scrollbar { display: none; }
   #send { background: linear-gradient(135deg, var(--vscode-charts-purple, #7C3AED), var(--vscode-charts-blue, #3B82F6));
     color: #fff; border: none; border-radius: 8px; width: 30px; height: 30px; cursor: pointer;
     font-size: 14px; transition: transform .12s ease, opacity .15s ease, filter .15s ease; }
