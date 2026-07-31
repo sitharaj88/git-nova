@@ -130,13 +130,26 @@ export class GitService {
 
   constructor(repositoryPath?: string) {
     if (repositoryPath) {
-      this.git = simpleGit(repositoryPath);
+      this.git = GitService.createGit(repositoryPath);
       this.repositoryPath = repositoryPath;
       logger.info(`GitService initialized with repository: ${repositoryPath}`);
     } else {
-      this.git = simpleGit();
+      this.git = GitService.createGit();
       logger.info('GitService initialized without repository path');
     }
+  }
+
+  /**
+   * Create a tuned simple-git instance. GIT_OPTIONAL_LOCKS=0 stops read
+   * commands (status etc.) from taking the index lock, preventing
+   * `index.lock` contention with user-initiated operations; mutating
+   * commands still lock normally.
+   */
+  private static createGit(baseDir?: string): SimpleGit {
+    return simpleGit({
+      ...(baseDir ? { baseDir } : {}),
+      maxConcurrentProcesses: 4,
+    }).env({ ...process.env, GIT_OPTIONAL_LOCKS: '0' });
   }
 
   /**
@@ -160,7 +173,7 @@ export class GitService {
       await this.git.cwd(path).init();
       this.repositoryPath = path;
       this.gitDirCache = null;
-      this.git = simpleGit(path);
+      this.git = GitService.createGit(path);
       this.cache.clear();
       logger.info('Git repository initialized successfully');
     } catch (error) {
@@ -183,7 +196,7 @@ export class GitService {
 
     // Validate that the path is a valid git repository
     try {
-      const testGit = simpleGit(path);
+      const testGit = GitService.createGit(path);
       await testGit.status();
       this.repositoryPath = path;
       this.gitDirCache = null;
@@ -585,51 +598,53 @@ export class GitService {
     logger.debug(`Fetching commit details: ${hash}`);
     const SEP = '\x1f';
     try {
-      // 1) Metadata only (no diff). Body is last so embedded newlines don't
-      //    interfere with the other fields.
-      const metaOut = await this.measured('show', () =>
+      // ONE `git show` for metadata + per-file status (--raw) + line stats
+      // (--numstat); the old implementation spawned three. The %x00 sentinel
+      // separates the formatted header (body last, so embedded newlines don't
+      // interfere) from the diff sections.
+      const out = await this.measured('show', () =>
         this.git.show([
-          '-s',
-          `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s${SEP}%b`,
+          `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s${SEP}%b%x00`,
+          '--raw',
+          '--numstat',
           hash,
         ])
       );
-      const metaParts = metaOut.split(SEP);
 
-      // 2) Per-file line stats (machine-readable): "<add>\t<del>\t<path>".
-      const numOut = await this.measured('show', () =>
-        this.git.show([hash, '--numstat', '--format='])
-      );
-      // 3) Per-file status letters: "<STATUS>\t<path>" (R/C carry old + new).
-      const nameOut = await this.measured('show', () =>
-        this.git.show([hash, '--name-status', '--format='])
-      );
+      const nul = out.indexOf('\x00');
+      const metaParts = (nul >= 0 ? out.slice(0, nul) : out).split(SEP);
+      const diffSection = nul >= 0 ? out.slice(nul + 1) : '';
 
-      // Build a path -> status map from --name-status.
+      // --raw lines (":<modes> <shas> <STATUS>\t<path>[\t<newpath>]") carry
+      // the per-file status letter; --numstat lines carry the line counts.
       const statusMap = new Map<string, FileStatus>();
-      for (const line of nameOut.split('\n')) {
-        const cols = line.split('\t');
-        if (cols.length < 2 || !cols[0]) {
-          continue;
-        }
-        const code = cols[0][0];
-        const targetPath = cols[cols.length - 1].trim();
-        statusMap.set(
-          targetPath,
-          code === 'A'
-            ? FileStatus.Added
-            : code === 'D'
-              ? FileStatus.Deleted
-              : code === 'R'
-                ? FileStatus.Renamed
-                : FileStatus.Modified
-        );
-      }
-
       const files: CommitFile[] = [];
       let totalAdditions = 0;
       let totalDeletions = 0;
-      for (const line of numOut.split('\n')) {
+
+      for (const line of diffSection.split('\n')) {
+        if (line.startsWith(':')) {
+          const tabIdx = line.indexOf('\t');
+          if (tabIdx < 0) {
+            continue;
+          }
+          const info = line.slice(0, tabIdx).trim().split(/\s+/);
+          const code = (info[info.length - 1] || '')[0];
+          const paths = line.slice(tabIdx + 1).split('\t');
+          const targetPath = paths[paths.length - 1].trim();
+          statusMap.set(
+            targetPath,
+            code === 'A'
+              ? FileStatus.Added
+              : code === 'D'
+                ? FileStatus.Deleted
+                : code === 'R'
+                  ? FileStatus.Renamed
+                  : FileStatus.Modified
+          );
+          continue;
+        }
+
         const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
         if (!m) {
           continue;
@@ -956,20 +971,36 @@ export class GitService {
   private async fetchCurrentBranch(): Promise<Branch> {
     logger.debug('Fetching current branch');
     try {
-      const branches = await this.measured('branches', () => this.git.branch());
-      const currentBranchName = branches.current;
+      // `rev-parse --abbrev-ref HEAD` is far cheaper than enumerating every
+      // branch just to read HEAD (the old implementation ran `git branch`).
+      const name = (
+        await this.measured('branches', () => this.git.raw(['rev-parse', '--abbrev-ref', 'HEAD']))
+      ).trim();
 
-      if (!currentBranchName) {
+      if (!name || name === 'HEAD') {
+        // Detached HEAD — keep the historical error contract
         throw new GitError('No current branch found (detached HEAD state)', 'branch');
       }
 
+      // Enrich with hash/ahead/behind from the branch cache when warm; fall
+      // back to a minimal object otherwise (a later branches fetch fills it).
+      try {
+        const { local } = await this.getAllBranches();
+        const found = local.find(b => b.name === name);
+        if (found) {
+          return { ...found, isCurrent: true };
+        }
+      } catch {
+        // Branch enumeration failing shouldn't break HEAD resolution
+      }
+
       const branch: Branch = {
-        name: currentBranchName,
+        name,
         isCurrent: true,
         isRemote: false,
         commit: {
-          hash: branches.branches[currentBranchName]?.commit || '',
-          shortHash: branches.branches[currentBranchName]?.commit?.substring(0, 7) || '',
+          hash: '',
+          shortHash: '',
           message: '',
           author: { name: '', email: '' },
           date: new Date(),
@@ -999,50 +1030,116 @@ export class GitService {
    * @returns Array of local branches
    */
   async getLocalBranches(): Promise<Branch[]> {
-    return this.cache.getOrFetch('branches:local', 'branches', GitService.TTL_BRANCHES, () =>
-      this.fetchLocalBranches()
+    return (await this.getAllBranches()).local;
+  }
+
+  /**
+   * Fetch local + remote branches with ONE `for-each-ref` process, including
+   * real upstream/ahead/behind data (the old per-kind `git branch` calls
+   * hardcoded ahead/behind to 0 and tracking to undefined).
+   */
+  private async getAllBranches(): Promise<{ local: Branch[]; remote: Branch[] }> {
+    return this.cache.getOrFetch('branches:all', 'branches', GitService.TTL_BRANCHES, () =>
+      this.fetchAllBranches()
     );
   }
 
-  private async fetchLocalBranches(): Promise<Branch[]> {
-    logger.debug('Fetching local branches');
+  private async fetchAllBranches(): Promise<{ local: Branch[]; remote: Branch[] }> {
+    logger.debug('Fetching all branches (for-each-ref)');
     try {
-      const branches = await this.measured('branches', () => this.git.branch());
-      const localBranches: Branch[] = [];
+      const out = await this.measured('branches', () =>
+        this.git.raw([
+          'for-each-ref',
+          'refs/heads',
+          'refs/remotes',
+          '--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:iso8601-strict)%00%(subject)',
+        ])
+      );
 
-      for (const [name, branchData] of Object.entries(branches.branches)) {
-        if (!name.startsWith('remotes/')) {
-          const data = branchData as any;
-          localBranches.push({
+      const local: Branch[] = [];
+      const remote: Branch[] = [];
+
+      for (const line of out.split('\n')) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [refname, hash, headMark, upstream, track, dateIso, subject] = line.split('\x00');
+        if (!refname || !hash) {
+          continue;
+        }
+
+        // upstream:track renders "[ahead N, behind M]", "[gone]" or "".
+        let ahead = 0;
+        let behind = 0;
+        const aheadMatch = track?.match(/ahead (\d+)/);
+        const behindMatch = track?.match(/behind (\d+)/);
+        if (aheadMatch) {
+          ahead = parseInt(aheadMatch[1], 10);
+        }
+        if (behindMatch) {
+          behind = parseInt(behindMatch[1], 10);
+        }
+
+        const date = dateIso ? new Date(dateIso) : new Date();
+        const commit = {
+          hash,
+          shortHash: hash.substring(0, 7),
+          message: subject || '',
+          author: { name: '', email: '' },
+          date,
+          parents: [],
+          refs: [],
+        };
+
+        if (refname.startsWith('refs/heads/')) {
+          const name = refname.substring('refs/heads/'.length);
+          local.push({
             name,
-            isCurrent: name === branches.current,
+            isCurrent: headMark === '*',
             isRemote: false,
-            commit: {
-              hash: data.commit || '',
-              shortHash: data.commit?.substring(0, 7) || '',
-              message: '',
-              author: { name: '', email: '' },
-              date: new Date(),
-              parents: [],
-              refs: [],
-            },
+            commit,
+            trackingBranch: upstream
+              ? {
+                  name: upstream,
+                  isCurrent: false,
+                  isRemote: true,
+                  commit: { ...commit, message: '' },
+                  ahead: 0,
+                  behind: 0,
+                  lastCommitDate: date,
+                }
+              : undefined,
+            ahead,
+            behind,
+            lastCommitDate: date,
+          });
+        } else if (refname.startsWith('refs/remotes/')) {
+          const full = refname.substring('refs/remotes/'.length);
+          // Skip symbolic refs like origin/HEAD
+          if (full.endsWith('/HEAD') || full === 'HEAD') {
+            continue;
+          }
+          const slash = full.indexOf('/');
+          const remoteName = slash > 0 ? full.substring(0, slash) : full;
+          const branchName = slash > 0 ? full.substring(slash + 1) : full;
+          remote.push({
+            name: branchName,
+            isCurrent: false,
+            isRemote: true,
+            remoteName,
+            commit,
             ahead: 0,
             behind: 0,
-            lastCommitDate: new Date(),
+            lastCommitDate: date,
           });
         }
       }
 
-      logger.debug(`Found ${localBranches.length} local branches`);
-      return localBranches;
+      logger.debug(`Found ${local.length} local / ${remote.length} remote branches`);
+      return { local, remote };
     } catch (error) {
-      logger.error('Failed to fetch local branches', error);
-      throw new GitError(
-        `Failed to fetch local branches: ${error}`,
-        'branch',
-        undefined,
-        String(error)
-      );
+      logger.error('Failed to fetch branches', error);
+      throw new GitError(`Failed to fetch branches: ${error}`, 'branch', undefined, String(error));
     }
   }
 
@@ -1051,60 +1148,7 @@ export class GitService {
    * @returns Array of remote branches
    */
   async getRemoteBranches(): Promise<Branch[]> {
-    return this.cache.getOrFetch('branches:remote', 'branches', GitService.TTL_BRANCHES, () =>
-      this.fetchRemoteBranches()
-    );
-  }
-
-  private async fetchRemoteBranches(): Promise<Branch[]> {
-    logger.debug('Fetching remote branches');
-    try {
-      const branches = await this.measured('branches', () => this.git.branch(['-r']));
-      const remoteBranches: Branch[] = [];
-
-      for (const [name, branchData] of Object.entries(branches.branches)) {
-        // Remote branch names from -r are like "origin/main" or "origin/feature/xyz"
-        // Skip HEAD references like "origin/HEAD -> origin/main"
-        if (name.includes('HEAD')) {
-          continue;
-        }
-
-        const parts = name.split('/');
-        const remoteName = parts[0]; // e.g., "origin"
-        const branchName = parts.slice(1).join('/'); // e.g., "main" or "feature/xyz"
-        const data = branchData as any;
-
-        remoteBranches.push({
-          name: branchName || name,
-          isCurrent: false,
-          isRemote: true,
-          remoteName,
-          commit: {
-            hash: data.commit || '',
-            shortHash: data.commit?.substring(0, 7) || '',
-            message: '',
-            author: { name: '', email: '' },
-            date: new Date(),
-            parents: [],
-            refs: [],
-          },
-          ahead: 0,
-          behind: 0,
-          lastCommitDate: new Date(),
-        });
-      }
-
-      logger.debug(`Found ${remoteBranches.length} remote branches`);
-      return remoteBranches;
-    } catch (error) {
-      logger.error('Failed to fetch remote branches', error);
-      throw new GitError(
-        `Failed to fetch remote branches: ${error}`,
-        'branch',
-        undefined,
-        String(error)
-      );
-    }
+    return (await this.getAllBranches()).remote;
   }
 
   /**
@@ -1949,6 +1993,61 @@ export class GitService {
     return { type: null };
   }
 
+  /**
+   * Async variant of {@link getOperationState} for the refresh hot path —
+   * avoids blocking the extension host event loop with sync fs checks on
+   * every refresh cycle. Sync call sites (one-off command checks) keep using
+   * the sync version.
+   */
+  async getOperationStateAsync(): Promise<GitOperationState> {
+    const gitDir = this.resolveGitDir();
+    if (!gitDir) {
+      return { type: null };
+    }
+
+    const exists = (p: string): Promise<boolean> =>
+      fs.promises.access(p).then(
+        () => true,
+        () => false
+      );
+    const readStep = async (p: string): Promise<number | undefined> => {
+      try {
+        const value = parseInt((await fs.promises.readFile(p, 'utf8')).trim(), 10);
+        return isNaN(value) ? undefined : value;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const rebaseMerge = path.join(gitDir, 'rebase-merge');
+    if (await exists(rebaseMerge)) {
+      const [step, total] = await Promise.all([
+        readStep(path.join(rebaseMerge, 'msgnum')),
+        readStep(path.join(rebaseMerge, 'end')),
+      ]);
+      return { type: 'rebase', step, total };
+    }
+
+    const rebaseApply = path.join(gitDir, 'rebase-apply');
+    if (await exists(rebaseApply)) {
+      const [step, total] = await Promise.all([
+        readStep(path.join(rebaseApply, 'next')),
+        readStep(path.join(rebaseApply, 'last')),
+      ]);
+      return { type: 'rebase', step, total };
+    }
+
+    if (await exists(path.join(gitDir, 'MERGE_HEAD'))) {
+      return { type: 'merge' };
+    }
+
+    if (await exists(path.join(gitDir, 'CHERRY_PICK_HEAD'))) {
+      return { type: 'cherry-pick' };
+    }
+
+    return { type: null };
+  }
+
   // ==================== Rebase Operations ====================
 
   /**
@@ -2495,7 +2594,17 @@ export class GitService {
   > {
     logger.debug('Fetching tags');
     try {
-      const result = await this.measured('tags', () => this.git.tags());
+      // One `for-each-ref` for everything — the old implementation ran
+      // `rev-parse` + `tag -l --format` per tag (2N+1 processes for N tags).
+      // NUL field separators are collision-safe for arbitrary tag subjects.
+      const result = await this.measured('tags', () =>
+        this.git.raw([
+          'for-each-ref',
+          'refs/tags',
+          '--format=%(refname:short)%00%(objectname)%00%(contents:subject)%00%(taggername)%00%(taggerdate:iso8601)',
+        ])
+      );
+
       const tags: {
         name: string;
         hash: string;
@@ -2504,46 +2613,23 @@ export class GitService {
         taggerDate?: string;
       }[] = [];
 
-      for (const tagName of result.all) {
-        try {
-          // Get the commit hash for this tag
-          const hashResult = await this.git.raw(['rev-parse', tagName]);
-          const hash = hashResult.trim();
-
-          // Try to get annotation details
-          let message: string | undefined;
-          let taggerName: string | undefined;
-          let taggerDate: string | undefined;
-
-          try {
-            const tagDetails = await this.git.raw([
-              'tag',
-              '-l',
-              tagName,
-              '-n10',
-              '--format=%(contents:subject)|||%(taggername)|||%(taggerdate:iso)',
-            ]);
-            const parts = tagDetails.trim().split('|||');
-            if (parts.length >= 3) {
-              message = parts[0] || undefined;
-              taggerName = parts[1] || undefined;
-              taggerDate = parts[2] || undefined;
-            }
-          } catch {
-            // Not an annotated tag
-          }
-
-          tags.push({
-            name: tagName,
-            hash,
-            message,
-            taggerName,
-            taggerDate,
-          });
-        } catch (error) {
-          // Skip tags we can't parse
-          logger.warn(`Failed to parse tag ${tagName}:`, error);
+      for (const line of result.split('\n')) {
+        if (!line.trim()) {
+          continue;
         }
+        const [name, hash, message, taggerName, taggerDate] = line.split('\x00');
+        if (!name || !hash) {
+          continue;
+        }
+        tags.push({
+          name,
+          hash,
+          // Empty fields mean a lightweight tag — keep them undefined so
+          // consumers' `isAnnotated: !!message` logic is unchanged.
+          message: message || undefined,
+          taggerName: taggerName || undefined,
+          taggerDate: taggerDate || undefined,
+        });
       }
 
       logger.debug(`Found ${tags.length} tags`);

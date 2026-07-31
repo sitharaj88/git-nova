@@ -316,16 +316,18 @@ export class RepositoryManager {
     }
 
     try {
-      const status = await this.gitService.getWorkingTreeStatus();
-      const currentBranch = await this.gitService.getCurrentBranch();
+      const [status, currentBranch, operationState] = await Promise.all([
+        this.gitService.getWorkingTreeStatus(),
+        this.gitService.getCurrentBranch(),
+        // Async .git state check — keeps sync fs I/O off the refresh hot path
+        this.gitService.getOperationStateAsync(),
+      ]);
 
       this.repositoryState.status = status;
       this.repositoryState.currentBranch = currentBranch;
       this.repositoryState.isDirty = status.files.length > 0;
       this.repositoryState.lastUpdated = Date.now();
-
-      // Cheap .git state check — piggybacks on the existing refresh cycle
-      this.operationState = this.gitService.getOperationState();
+      this.operationState = operationState;
       this.repositoryState.isRebasing = this.operationState.type === 'rebase';
       this.repositoryState.isMerging = this.operationState.type === 'merge';
 

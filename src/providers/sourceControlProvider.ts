@@ -162,9 +162,11 @@ export class SourceControlProvider implements vscode.TreeDataProvider<SourceCont
     const items: SourceControlTreeItem[] = [];
 
     try {
-      // Get current branch
-      const currentBranch = await this.gitService.getCurrentBranch();
-      const status = await this.gitService.getWorkingTreeStatus();
+      // Prefer RepositoryManager's already-refreshed state (zero git spawns);
+      // fall back to GitService (cached/deduped) before the first refresh.
+      const state = this.repositoryManager.getRepositoryState();
+      const currentBranch = state?.currentBranch ?? (await this.gitService.getCurrentBranch());
+      const status = state?.status ?? (await this.gitService.getWorkingTreeStatus());
 
       // Calculate changes
       const stagedCount = status.staged?.length || 0;
