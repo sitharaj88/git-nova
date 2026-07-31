@@ -28,6 +28,16 @@ export interface ExtensionConfig {
   autoStashBeforeRebase: boolean;
   includeUntrackedInStash: boolean;
 
+  // AI settings
+  aiEnabled: boolean;
+  aiProvider: string;
+  aiModel: string;
+  aiBaseUrl: string;
+  aiPreset: string;
+  aiMaxTokens: number;
+  aiVscodeModelFamily: string;
+  aiConventionalCommits: boolean;
+
   // Remote settings
   autoFetch: boolean;
   autoFetchInterval: number;
@@ -56,6 +66,14 @@ const DEFAULT_CONFIG: ExtensionConfig = {
   showLineNumbers: true,
   autoStashBeforeRebase: false,
   includeUntrackedInStash: false,
+  aiEnabled: true,
+  aiProvider: 'vscode',
+  aiModel: '',
+  aiBaseUrl: '',
+  aiPreset: 'custom',
+  aiMaxTokens: 4096,
+  aiVscodeModelFamily: '',
+  aiConventionalCommits: true,
   autoFetch: false,
   autoFetchInterval: 300000,
   autoPushAfterCommit: false,
@@ -251,6 +269,20 @@ export class ConfigManager {
       includeUntrackedInStash: vscodeConfig.get(
         'includeUntrackedInStash',
         DEFAULT_CONFIG.includeUntrackedInStash
+      ),
+      aiEnabled: vscodeConfig.get('ai.enabled', DEFAULT_CONFIG.aiEnabled),
+      aiProvider: vscodeConfig.get('ai.provider', DEFAULT_CONFIG.aiProvider),
+      aiModel: vscodeConfig.get('ai.model', DEFAULT_CONFIG.aiModel),
+      aiBaseUrl: vscodeConfig.get('ai.baseUrl', DEFAULT_CONFIG.aiBaseUrl),
+      aiPreset: vscodeConfig.get('ai.preset', DEFAULT_CONFIG.aiPreset),
+      aiMaxTokens: vscodeConfig.get('ai.maxTokens', DEFAULT_CONFIG.aiMaxTokens),
+      aiVscodeModelFamily: vscodeConfig.get(
+        'ai.vscodeModelFamily',
+        DEFAULT_CONFIG.aiVscodeModelFamily
+      ),
+      aiConventionalCommits: vscodeConfig.get(
+        'ai.conventionalCommits',
+        DEFAULT_CONFIG.aiConventionalCommits
       ),
       autoFetch: vscodeConfig.get('autoFetch', DEFAULT_CONFIG.autoFetch),
       autoFetchInterval: vscodeConfig.get('autoFetchInterval', DEFAULT_CONFIG.autoFetchInterval),

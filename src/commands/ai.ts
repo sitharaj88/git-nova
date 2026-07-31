@@ -9,8 +9,10 @@ import {
   buildCommitPrompt,
   buildExplainPrompt,
   buildConflictPrompt,
+  buildReviewPrompt,
   stripCodeFence,
 } from '../services/aiService';
+import { AiCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
 
 /** Scheme + in-memory store for AI-proposed conflict resolutions (diff preview). */
@@ -37,25 +39,45 @@ export function registerAiCommands(
 
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(PROPOSAL_SCHEME, proposalProvider),
-    vscode.commands.registerCommand('gitNova.ai.generateCommitMessage', async () => {
+    vscode.commands.registerCommand(AiCommands.GenerateCommitMessage, async () => {
       await handleGenerateCommitMessage(gitService, repositoryManager, eventBus);
     }),
-    vscode.commands.registerCommand('gitNova.ai.explainCommit', async (arg?: unknown) => {
+    vscode.commands.registerCommand(AiCommands.ExplainCommit, async (arg?: unknown) => {
       await handleExplainCommit(arg, gitService);
     }),
-    vscode.commands.registerCommand('gitNova.ai.explainChanges', async () => {
+    vscode.commands.registerCommand(AiCommands.ExplainChanges, async () => {
       await handleExplainChanges(gitService);
     }),
-    vscode.commands.registerCommand('gitNova.ai.resolveConflicts', async () => {
+    vscode.commands.registerCommand(AiCommands.ResolveConflicts, async () => {
       await handleResolveConflicts(gitService, repositoryManager, eventBus);
     }),
-    vscode.commands.registerCommand('gitNova.ai.reviewChanges', async () => {
+    vscode.commands.registerCommand(AiCommands.ReviewChanges, async () => {
       await handleReviewChanges(gitService);
     }),
-    vscode.commands.registerCommand('gitNova.ai.setApiKey', async () => {
+    vscode.commands.registerCommand(AiCommands.SetApiKey, async () => {
       await aiService.setApiKey();
+    }),
+    vscode.commands.registerCommand(AiCommands.SelectModel, async () => {
+      await aiService.selectModel();
     })
   );
+
+  // Status bar item showing the active provider/model; click to change.
+  const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
+  statusItem.name = 'GitNova AI Model';
+  statusItem.command = AiCommands.SelectModel;
+  const refreshStatusItem = (): void => {
+    if (!aiService.isEnabled()) {
+      statusItem.hide();
+      return;
+    }
+    const { model } = aiService.getActiveModel();
+    statusItem.text = `$(sparkle) ${model}`;
+    statusItem.tooltip = 'GitNova AI — click to change provider/model';
+    statusItem.show();
+  };
+  refreshStatusItem();
+  context.subscriptions.push(statusItem, aiService.onDidChangeModel(refreshStatusItem));
 
   logger.info('AI commands registered successfully');
 }
@@ -230,32 +252,8 @@ function collectLintFindings(): string {
   return lines.join('\n');
 }
 
-/** Build the AI code-review prompt, fusing the diff with linter findings. */
-function buildReviewPrompt(
-  diff: string,
-  lintFindings: string
-): { role: 'system' | 'user'; content: string }[] {
-  const system =
-    'You are a meticulous senior code reviewer. Review the provided diff for ' +
-    'correctness bugs, security issues, performance problems, and maintainability. ' +
-    'You are also given findings from deterministic linters/compilers — incorporate ' +
-    'and prioritize them, but also find issues they cannot. ' +
-    'Return concise Markdown grouped by severity (Critical / High / Medium / Low). ' +
-    'For each finding give: file:line, what is wrong, and a concrete fix. ' +
-    'If the change looks good, say so briefly.';
-
-  const lintSection = lintFindings
-    ? `\n\nLinter/compiler findings for changed files:\n${lintFindings}`
-    : '\n\n(No linter findings were available from the editor.)';
-
-  const truncated = diff.length > 24000 ? diff.slice(0, 24000) + '\n[...truncated...]' : diff;
-  const user = `Review this diff:${lintSection}\n\n\`\`\`diff\n${truncated}\n\`\`\``;
-
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: user },
-  ];
-}
+// buildReviewPrompt now lives in services/ai/prompts.ts (shared with the
+// review panel) and is imported above.
 
 /** Recent commit subjects, used to mirror the repository's message style. */
 async function getRecentSubjects(gitService: GitService): Promise<string[]> {

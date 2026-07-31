@@ -20,9 +20,12 @@ export function registerCommitCommands(
   eventBus: EventBus
 ): void {
   // Create commit
-  const createCommand = vscode.commands.registerCommand(CommitCommands.Create, async () => {
-    await handleCreateCommit(gitService, repositoryManager, eventBus);
-  });
+  const createCommand = vscode.commands.registerCommand(
+    CommitCommands.Create,
+    async (message?: string) => {
+      await handleCreateCommit(gitService, repositoryManager, eventBus, message);
+    }
+  );
   context.subscriptions.push(createCommand);
 
   // View commit history
@@ -780,17 +783,22 @@ function showFilteredCommits(filterType: string, commits: Commit[]): void {
 }
 
 /**
- * Handle create commit - prompts for message and creates commit
+ * Handle create commit - prompts for message and creates commit.
+ * @param initialMessage - Optional prefilled message (template wizard, AI
+ * generation). Previously this argument was silently ignored even though
+ * callers passed one; it now prefills the input box for confirmation.
  */
 async function handleCreateCommit(
   gitService: GitService,
   repositoryManager: RepositoryManager,
-  eventBus: EventBus
+  eventBus: EventBus,
+  initialMessage?: string
 ): Promise<void> {
   try {
     const message = await vscode.window.showInputBox({
       prompt: 'Enter commit message',
       placeHolder: 'feat: describe your changes',
+      value: typeof initialMessage === 'string' ? initialMessage : undefined,
       validateInput: (value: string) => {
         if (!value || value.trim().length === 0) {
           return 'Please enter a commit message';

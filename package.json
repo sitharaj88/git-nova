@@ -919,6 +919,12 @@
         "icon": "$(key)"
       },
       {
+        "command": "gitNova.ai.selectModel",
+        "title": "GitNova: Select AI Model",
+        "category": "GitNova",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "gitNova.codeLens.toggle",
         "title": "GitNova: Toggle Git CodeLens (Authorship)",
         "category": "GitNova",
@@ -1729,14 +1735,46 @@
           "type": "string",
           "enum": [
             "vscode",
+            "anthropic",
+            "openai",
+            "gemini",
             "openai-compatible"
           ],
           "enumDescriptions": [
             "Use the built-in VS Code Language Model API (GitHub Copilot or any installed chat model). No API key required.",
-            "Use any OpenAI-compatible Chat Completions endpoint (OpenAI, Azure OpenAI, Ollama, LM Studio, Groq, OpenRouter, …)."
+            "Anthropic (Claude) via the Messages API. Requires an Anthropic API key.",
+            "OpenAI Chat Completions (Azure OpenAI auto-detected from the base URL). Requires an OpenAI API key.",
+            "Google Gemini. Requires a Gemini API key.",
+            "Any OpenAI-compatible Chat Completions endpoint (Ollama, LM Studio, Groq, OpenRouter, Mistral, xAI, DeepSeek, GLM, …)."
           ],
           "default": "vscode",
-          "description": "Which AI provider GitNova should use for AI features"
+          "description": "Which AI provider GitNova should use for AI features. Use 'GitNova: Select AI Model' for a guided picker."
+        },
+        "gitNova.ai.preset": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "groq",
+            "openrouter",
+            "mistral",
+            "xai",
+            "deepseek",
+            "glm",
+            "custom"
+          ],
+          "default": "custom",
+          "description": "Preset used to prefill the OpenAI-compatible base URL (informational; set via the model picker)"
+        },
+        "gitNova.ai.maxTokens": {
+          "type": "number",
+          "default": 4096,
+          "description": "Maximum output tokens per AI request"
+        },
+        "gitNova.ai.azureApiVersion": {
+          "type": "string",
+          "default": "2024-06-01",
+          "description": "api-version query parameter used when the OpenAI base URL points at Azure OpenAI"
         },
         "gitNova.ai.vscodeModelFamily": {
           "type": "string",

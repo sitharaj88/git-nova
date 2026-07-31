@@ -5,3 +5,6 @@ export { registerStashCommands } from './stash';
 export { registerRebaseCommands } from './rebase';
 export { registerMergeCommands } from './merge';
 export { registerRemoteCommands } from './remote';
+export { registerAiCommands } from './ai';
+export { registerGitHubCommands, registerGitHubView } from './github';
+export { registerOperationCommands } from './operation';

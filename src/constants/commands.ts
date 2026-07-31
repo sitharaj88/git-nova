@@ -109,3 +109,20 @@ export const RemoteCommands = {
   SetUrl: 'gitNova.remote.setUrl',
   Prune: 'gitNova.remote.prune',
 } as const;
+
+/**
+ * Commands for AI-assisted features
+ */
+export const AiCommands = {
+  GenerateCommitMessage: 'gitNova.ai.generateCommitMessage',
+  ExplainCommit: 'gitNova.ai.explainCommit',
+  ExplainChanges: 'gitNova.ai.explainChanges',
+  ResolveConflicts: 'gitNova.ai.resolveConflicts',
+  ReviewChanges: 'gitNova.ai.reviewChanges',
+  Review: 'gitNova.ai.review',
+  SetApiKey: 'gitNova.ai.setApiKey',
+  SelectModel: 'gitNova.ai.selectModel',
+  SearchCommits: 'gitNova.ai.searchCommits',
+  GenerateChangelog: 'gitNova.ai.generateChangelog',
+  SuggestBranchName: 'gitNova.ai.suggestBranchName',
+} as const;
