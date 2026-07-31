@@ -18,6 +18,8 @@ import {
 } from '../models';
 import { logger } from '../utils/logger';
 import { performanceMonitor } from '../services/performanceMonitor';
+import { GitResultCache } from './gitResultCache';
+import { RefreshScope } from './refreshScheduler';
 
 /**
  * Custom error class for Git operations
@@ -103,9 +105,28 @@ if (mode === 'sequence') {
  * Wraps simple-git library and provides a clean, typed API
  */
 export class GitService {
+  /** TTLs for the read cache. Short for volatile data, long for immutable. */
+  private static readonly TTL_STATUS = 3_000;
+  private static readonly TTL_BRANCHES = 10_000;
+  private static readonly TTL_TAGS = 30_000;
+  private static readonly TTL_STASHES = 10_000;
+  private static readonly TTL_REMOTES = 60_000;
+  private static readonly TTL_LOG = 5_000;
+  private static readonly TTL_COMMIT = 600_000; // commit details are immutable
+
   private git: SimpleGit;
   private repositoryPath: string | null = null;
   private gitDirCache: string | null = null;
+  private readonly cache = new GitResultCache();
+
+  /**
+   * Invalidate cached read results for the given scopes. Called by mutating
+   * methods below and by the RefreshScheduler when the .git watcher fires
+   * (covering git usage from the terminal or other tools).
+   */
+  invalidate(scopes: readonly RefreshScope[] | '*'): void {
+    this.cache.invalidate(scopes);
+  }
 
   constructor(repositoryPath?: string) {
     if (repositoryPath) {
@@ -140,6 +161,7 @@ export class GitService {
       this.repositoryPath = path;
       this.gitDirCache = null;
       this.git = simpleGit(path);
+      this.cache.clear();
       logger.info('Git repository initialized successfully');
     } catch (error) {
       logger.error('Failed to initialize git repository', error);
@@ -166,6 +188,7 @@ export class GitService {
       this.repositoryPath = path;
       this.gitDirCache = null;
       this.git = testGit;
+      this.cache.clear();
       logger.info(`Repository path validated: ${path}`);
     } catch (error) {
       logger.error(`Path is not a valid git repository: ${path}`, error);
@@ -208,6 +231,12 @@ export class GitService {
    * @returns Complete git status including all files
    */
   async getWorkingTreeStatus(): Promise<GitStatus> {
+    return this.cache.getOrFetch('status', 'status', GitService.TTL_STATUS, () =>
+      this.fetchWorkingTreeStatus()
+    );
+  }
+
+  private async fetchWorkingTreeStatus(): Promise<GitStatus> {
     logger.debug('Fetching working tree status');
     try {
       const status: StatusResult = await this.measured('status', () => this.git.status());
@@ -294,6 +323,15 @@ export class GitService {
     }
   }
 
+  /**
+   * Raw `git blame --porcelain` output for a file. Spawn-based via simple-git
+   * (no shell, no oversized exec buffer) and instrumented like other reads.
+   * @param filePath - Absolute or repo-relative file path
+   */
+  async blameFile(filePath: string): Promise<string> {
+    return this.measured('blame', () => this.git.raw(['blame', '--porcelain', '--', filePath]));
+  }
+
   // ==================== Commit Operations ====================
 
   /**
@@ -324,6 +362,7 @@ export class GitService {
         refs: [],
       };
 
+      this.cache.invalidate(['status', 'commits', 'branches']);
       logger.info(`Commit created successfully: ${commit.shortHash}`);
       return commit;
     } catch (error) {
@@ -356,6 +395,7 @@ export class GitService {
         refs: [],
       };
 
+      this.cache.invalidate(['status', 'commits', 'branches']);
       logger.info(`Commit amended successfully: ${commit.shortHash}`);
       return commit;
     } catch (error) {
@@ -382,6 +422,21 @@ export class GitService {
    * @returns Array of commits
    */
   async getCommits(options?: {
+    maxCount?: number;
+    from?: string;
+    to?: string;
+    author?: string;
+    since?: Date;
+    until?: Date;
+    file?: string;
+  }): Promise<Commit[]> {
+    const key = `log:${JSON.stringify(options ?? {})}`;
+    return this.cache.getOrFetch(key, 'commits', GitService.TTL_LOG, () =>
+      this.fetchCommits(options)
+    );
+  }
+
+  private async fetchCommits(options?: {
     maxCount?: number;
     from?: string;
     to?: string;
@@ -466,6 +521,12 @@ export class GitService {
    * @returns Newest-first commits with `parents` and `refs` populated
    */
   async getGraphCommits(maxCount = 200): Promise<Commit[]> {
+    return this.cache.getOrFetch(`graph:${maxCount}`, 'commits', GitService.TTL_LOG, () =>
+      this.fetchGraphCommits(maxCount)
+    );
+  }
+
+  private async fetchGraphCommits(maxCount: number): Promise<Commit[]> {
     logger.debug('Fetching commit graph');
     const SEP = '\x1f';
     try {
@@ -515,6 +576,12 @@ export class GitService {
    * @returns Detailed commit information
    */
   async getCommit(hash: string): Promise<CommitDetail> {
+    return this.cache.getOrFetch(`commit:${hash}`, 'commits', GitService.TTL_COMMIT, () =>
+      this.fetchCommit(hash)
+    );
+  }
+
+  private async fetchCommit(hash: string): Promise<CommitDetail> {
     logger.debug(`Fetching commit details: ${hash}`);
     const SEP = '\x1f';
     try {
@@ -625,6 +692,7 @@ export class GitService {
     logger.info(`Cherry-picking commit: ${hash}`);
     try {
       await this.git.raw(['cherry-pick', hash]);
+      this.cache.invalidate(['status', 'commits', 'operation']);
       logger.info(`Commit cherry-picked successfully: ${hash}`);
     } catch (error) {
       logger.error('Failed to cherry-pick commit', error);
@@ -644,6 +712,7 @@ export class GitService {
     logger.info('Continuing cherry-pick');
     try {
       await this.git.raw(['cherry-pick', '--continue']);
+      this.cache.invalidate(['status', 'commits', 'operation']);
       logger.info('Cherry-pick continued successfully');
     } catch (error) {
       logger.error('Failed to continue cherry-pick', error);
@@ -663,6 +732,7 @@ export class GitService {
     logger.info('Skipping cherry-pick commit');
     try {
       await this.git.raw(['cherry-pick', '--skip']);
+      this.cache.invalidate(['status', 'commits', 'operation']);
       logger.info('Cherry-pick commit skipped successfully');
     } catch (error) {
       logger.error('Failed to skip cherry-pick commit', error);
@@ -682,6 +752,7 @@ export class GitService {
     logger.info('Aborting cherry-pick');
     try {
       await this.git.raw(['cherry-pick', '--abort']);
+      this.cache.invalidate(['status', 'commits', 'operation']);
       logger.info('Cherry-pick aborted successfully');
     } catch (error) {
       logger.error('Failed to abort cherry-pick', error);
@@ -702,6 +773,7 @@ export class GitService {
     logger.info(`Reverting commit: ${hash}`);
     try {
       await this.git.revert(hash);
+      this.cache.invalidate(['status', 'commits']);
       logger.info(`Commit reverted successfully: ${hash}`);
     } catch (error) {
       logger.error('Failed to revert commit', error);
@@ -719,6 +791,7 @@ export class GitService {
     try {
       const modeFlag = mode === 'soft' ? '--soft' : mode === 'hard' ? '--hard' : '--mixed';
       await this.git.reset([modeFlag, hash]);
+      this.cache.invalidate(['status', 'commits', 'branches']);
       logger.info(`Reset to ${hash} successfully (${mode})`);
     } catch (error) {
       logger.error('Failed to reset commit', error);
@@ -793,6 +866,7 @@ export class GitService {
       } else {
         await this.git.fetch();
       }
+      this.cache.invalidate(['branches', 'commits', 'remotes']);
       logger.info('Fetch completed successfully');
     } catch (error) {
       logger.error('Failed to fetch from remote', error);
@@ -833,6 +907,7 @@ export class GitService {
         await this.git.push();
       }
 
+      this.cache.invalidate(['branches', 'commits', 'remotes']);
       logger.info('Push completed successfully');
     } catch (error) {
       logger.error('Failed to push to remote', error);
@@ -858,6 +933,7 @@ export class GitService {
       } else {
         await this.git.pull();
       }
+      this.cache.invalidate(['status', 'branches', 'commits', 'remotes']);
       logger.info('Pull completed successfully');
     } catch (error) {
       logger.error('Failed to pull from remote', error);
@@ -872,6 +948,12 @@ export class GitService {
    * @returns The current branch
    */
   async getCurrentBranch(): Promise<Branch> {
+    return this.cache.getOrFetch('head', 'status', GitService.TTL_STATUS, () =>
+      this.fetchCurrentBranch()
+    );
+  }
+
+  private async fetchCurrentBranch(): Promise<Branch> {
     logger.debug('Fetching current branch');
     try {
       const branches = await this.measured('branches', () => this.git.branch());
@@ -917,6 +999,12 @@ export class GitService {
    * @returns Array of local branches
    */
   async getLocalBranches(): Promise<Branch[]> {
+    return this.cache.getOrFetch('branches:local', 'branches', GitService.TTL_BRANCHES, () =>
+      this.fetchLocalBranches()
+    );
+  }
+
+  private async fetchLocalBranches(): Promise<Branch[]> {
     logger.debug('Fetching local branches');
     try {
       const branches = await this.measured('branches', () => this.git.branch());
@@ -963,6 +1051,12 @@ export class GitService {
    * @returns Array of remote branches
    */
   async getRemoteBranches(): Promise<Branch[]> {
+    return this.cache.getOrFetch('branches:remote', 'branches', GitService.TTL_BRANCHES, () =>
+      this.fetchRemoteBranches()
+    );
+  }
+
+  private async fetchRemoteBranches(): Promise<Branch[]> {
     logger.debug('Fetching remote branches');
     try {
       const branches = await this.measured('branches', () => this.git.branch(['-r']));
@@ -1043,6 +1137,7 @@ export class GitService {
         lastCommitDate: new Date(),
       };
 
+      this.cache.invalidate(['branches']);
       logger.info(`Branch created successfully: ${name}`);
       return branch;
     } catch (error) {
@@ -1061,6 +1156,7 @@ export class GitService {
     try {
       const args = force ? ['-D', name] : ['-d', name];
       await this.git.branch(args);
+      this.cache.invalidate(['branches']);
       logger.info(`Branch deleted successfully: ${name}`);
     } catch (error) {
       logger.error('Failed to delete branch', error);
@@ -1076,6 +1172,7 @@ export class GitService {
     logger.info(`Switching to branch: ${name}`);
     try {
       await this.git.checkout(name);
+      this.cache.invalidate(['status', 'branches', 'commits']);
       logger.info(`Switched to branch: ${name}`);
     } catch (error) {
       logger.error('Failed to switch branch', error);
@@ -1092,6 +1189,7 @@ export class GitService {
     logger.info(`Renaming branch: ${oldName} -> ${newName}`);
     try {
       await this.git.branch(['-m', oldName, newName]);
+      this.cache.invalidate(['branches', 'status']);
       logger.info(`Branch renamed successfully`);
     } catch (error) {
       logger.error('Failed to rename branch', error);
@@ -1108,6 +1206,7 @@ export class GitService {
     logger.info(`Setting upstream for ${localBranch} to ${upstream}`);
     try {
       await this.git.raw(['branch', '--set-upstream-to', upstream, localBranch]);
+      this.cache.invalidate(['branches']);
       logger.info(`Upstream set: ${localBranch} -> ${upstream}`);
     } catch (error) {
       logger.error('Failed to set upstream', error);
@@ -1123,6 +1222,7 @@ export class GitService {
     logger.info(`Unsetting upstream for ${localBranch}`);
     try {
       await this.git.raw(['branch', '--unset-upstream', localBranch]);
+      this.cache.invalidate(['branches']);
       logger.info(`Upstream unset for ${localBranch}`);
     } catch (error) {
       logger.error('Failed to unset upstream', error);
@@ -1140,6 +1240,7 @@ export class GitService {
     logger.debug(`Staging ${files.length} files`);
     try {
       await this.git.add(files);
+      this.cache.invalidate(['status']);
       logger.debug('Files staged successfully');
     } catch (error) {
       logger.error('Failed to stage files', error);
@@ -1156,6 +1257,7 @@ export class GitService {
     try {
       // Use mixed reset with explicit paths to avoid unstaging everything by accident
       await this.git.raw(['reset', 'HEAD', '--', ...files]);
+      this.cache.invalidate(['status']);
       logger.debug('Files unstaged successfully');
     } catch (error) {
       logger.error('Failed to unstage files', error);
@@ -1196,6 +1298,7 @@ export class GitService {
         await this.git.raw(['clean', '-f', '--', ...untracked]);
       }
 
+      this.cache.invalidate(['status']);
       logger.debug('Changes discarded successfully');
     } catch (error) {
       logger.error('Failed to discard changes', error);
@@ -1642,6 +1745,7 @@ export class GitService {
       const stashes = await this.getStashes();
       const newStash = stashes[0];
 
+      this.cache.invalidate(['stashes', 'status']);
       logger.info(`Stash created successfully: ${newStash?.ref}`);
       return newStash!;
     } catch (error) {
@@ -1655,6 +1759,12 @@ export class GitService {
    * @returns Array of stashes
    */
   async getStashes(): Promise<Stash[]> {
+    return this.cache.getOrFetch('stashes', 'stashes', GitService.TTL_STASHES, () =>
+      this.fetchStashes()
+    );
+  }
+
+  private async fetchStashes(): Promise<Stash[]> {
     logger.debug('Fetching stashes');
     try {
       const result = await this.measured('stash', () => this.git.stashList());
@@ -1701,6 +1811,7 @@ export class GitService {
     logger.info(`Applying stash: ${index}`);
     try {
       await this.git.stash(['apply', `stash@{${index}}`]);
+      this.cache.invalidate(['stashes', 'status']);
       logger.info(`Stash ${index} applied successfully`);
     } catch (error) {
       logger.error('Failed to apply stash', error);
@@ -1716,6 +1827,7 @@ export class GitService {
     logger.info(`Popping stash: ${index}`);
     try {
       await this.git.stash(['pop', `stash@{${index}}`]);
+      this.cache.invalidate(['stashes', 'status']);
       logger.info(`Stash ${index} popped successfully`);
     } catch (error) {
       logger.error('Failed to pop stash', error);
@@ -1731,6 +1843,7 @@ export class GitService {
     logger.info(`Dropping stash: ${index}`);
     try {
       await this.git.stash(['drop', `stash@{${index}}`]);
+      this.cache.invalidate(['stashes']);
       logger.info(`Stash ${index} dropped successfully`);
     } catch (error) {
       logger.error('Failed to drop stash', error);
@@ -1745,6 +1858,7 @@ export class GitService {
     logger.info('Clearing all stashes');
     try {
       await this.git.stash(['clear']);
+      this.cache.invalidate(['stashes']);
       logger.info('All stashes cleared successfully');
     } catch (error) {
       logger.error('Failed to clear stashes', error);
@@ -1847,6 +1961,7 @@ export class GitService {
     try {
       const args = branch ? [upstream, '--onto', branch] : [upstream];
       await this.git.rebase(args);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info(`Rebase started successfully`);
     } catch (error) {
       logger.error('Failed to start rebase', error);
@@ -1884,6 +1999,7 @@ export class GitService {
     logger.info('Continuing rebase');
     try {
       await this.getRebaseResumeGit().rebase(['--continue']);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Rebase continued successfully');
     } catch (error) {
       logger.error('Failed to continue rebase', error);
@@ -1900,6 +2016,7 @@ export class GitService {
     logger.info('Aborting rebase');
     try {
       await this.git.rebase(['--abort']);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Rebase aborted successfully');
     } catch (error) {
       logger.error('Failed to abort rebase', error);
@@ -1916,6 +2033,7 @@ export class GitService {
     logger.info('Skipping rebase commit');
     try {
       await this.getRebaseResumeGit().rebase(['--skip']);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Rebase commit skipped successfully');
     } catch (error) {
       logger.error('Failed to skip rebase commit', error);
@@ -2115,6 +2233,7 @@ export class GitService {
       }
       args.push(base);
       await git.rebase(args);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Interactive rebase completed successfully');
     } catch (error) {
       logger.error('Interactive rebase failed', error);
@@ -2165,6 +2284,7 @@ export class GitService {
       }
 
       await this.git.merge(args);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info(`Merge completed successfully`);
     } catch (error) {
       logger.error('Failed to merge branch', error);
@@ -2179,6 +2299,7 @@ export class GitService {
     logger.info('Aborting merge');
     try {
       await this.git.merge(['--abort']);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Merge aborted successfully');
     } catch (error) {
       logger.error('Failed to abort merge', error);
@@ -2193,6 +2314,7 @@ export class GitService {
     logger.info('Continuing merge');
     try {
       await this.git.commit(['--no-edit']);
+      this.cache.invalidate(['status', 'commits', 'branches', 'operation']);
       logger.info('Merge continued successfully');
     } catch (error) {
       logger.error('Failed to continue merge', error);
@@ -2234,6 +2356,7 @@ export class GitService {
     try {
       await this.git.raw(['checkout', '--ours', '--', filePath]);
       await this.git.add(filePath);
+      this.cache.invalidate(['status']);
       logger.info(`Accepted ours for ${filePath}`);
     } catch (error) {
       logger.error('Failed to accept ours', error);
@@ -2250,6 +2373,7 @@ export class GitService {
     try {
       await this.git.raw(['checkout', '--theirs', '--', filePath]);
       await this.git.add(filePath);
+      this.cache.invalidate(['status']);
       logger.info(`Accepted theirs for ${filePath}`);
     } catch (error) {
       logger.error('Failed to accept theirs', error);
@@ -2264,6 +2388,12 @@ export class GitService {
    * @returns Array of remotes
    */
   async getRemotes(): Promise<Remote[]> {
+    return this.cache.getOrFetch('remotes', 'remotes', GitService.TTL_REMOTES, () =>
+      this.fetchRemotes()
+    );
+  }
+
+  private async fetchRemotes(): Promise<Remote[]> {
     logger.debug('Fetching remotes');
     try {
       const result = await this.measured('remotes', () => this.git.getRemotes(true));
@@ -2291,6 +2421,7 @@ export class GitService {
     logger.info(`Adding remote: ${name} -> ${url}`);
     try {
       await this.git.remote(['add', name, url]);
+      this.cache.invalidate(['remotes', 'branches']);
       logger.info(`Remote ${name} added successfully`);
     } catch (error) {
       logger.error('Failed to add remote', error);
@@ -2306,6 +2437,7 @@ export class GitService {
     logger.info(`Removing remote: ${name}`);
     try {
       await this.git.remote(['remove', name]);
+      this.cache.invalidate(['remotes', 'branches']);
       logger.info(`Remote ${name} removed successfully`);
     } catch (error) {
       logger.error('Failed to remove remote', error);
@@ -2322,6 +2454,7 @@ export class GitService {
     logger.info(`Setting remote URL: ${name} -> ${url}`);
     try {
       await this.git.remote(['set-url', name, url]);
+      this.cache.invalidate(['remotes']);
       logger.info(`Remote URL for ${name} updated successfully`);
     } catch (error) {
       logger.error('Failed to set remote URL', error);
@@ -2337,6 +2470,7 @@ export class GitService {
     logger.info(`Pruning remote: ${name}`);
     try {
       await this.git.remote(['prune', name]);
+      this.cache.invalidate(['remotes', 'branches']);
       logger.info(`Remote ${name} pruned successfully`);
     } catch (error) {
       logger.error('Failed to prune remote', error);
@@ -2351,6 +2485,12 @@ export class GitService {
    * @returns Array of tags with name, hash, and optional annotation details
    */
   async getTags(): Promise<
+    { name: string; hash: string; message?: string; taggerName?: string; taggerDate?: string }[]
+  > {
+    return this.cache.getOrFetch('tags', 'tags', GitService.TTL_TAGS, () => this.fetchTags());
+  }
+
+  private async fetchTags(): Promise<
     { name: string; hash: string; message?: string; taggerName?: string; taggerDate?: string }[]
   > {
     logger.debug('Fetching tags');
@@ -2428,6 +2568,7 @@ export class GitService {
         args.push(commit);
       }
       await this.git.tag(args);
+      this.cache.invalidate(['tags']);
       logger.info(`Tag ${name} created successfully`);
     } catch (error) {
       logger.error('Failed to create tag', error);
@@ -2443,6 +2584,7 @@ export class GitService {
     logger.info(`Deleting tag: ${name}`);
     try {
       await this.git.tag(['-d', name]);
+      this.cache.invalidate(['tags']);
       logger.info(`Tag ${name} deleted successfully`);
     } catch (error) {
       logger.error('Failed to delete tag', error);
@@ -2474,6 +2616,7 @@ export class GitService {
     logger.info(`Checking out tag: ${name}`);
     try {
       await this.git.checkout(name);
+      this.cache.invalidate(['status', 'branches', 'commits']);
       logger.info(`Checked out tag ${name} successfully`);
     } catch (error) {
       logger.error('Failed to checkout tag', error);

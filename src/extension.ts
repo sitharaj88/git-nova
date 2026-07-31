@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from './core/gitService';
 import { RepositoryManager } from './core/repositoryManager';
 import { EventBus, EventType } from './core/eventBus';
-import { RefreshScheduler, ALL_SCOPES } from './core/refreshScheduler';
+import { RefreshScheduler, ALL_SCOPES, changeAffects } from './core/refreshScheduler';
 import { ConfigManager } from './core/configManager';
 import { registerBranchCommands } from './commands/branch';
 import { registerCommitCommands } from './commands/commit';
@@ -84,6 +84,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Single coalesced refresh pipeline — all refresh triggers route through it
     refreshScheduler = new RefreshScheduler(repositoryManager, eventBus);
+    // Invalidate GitService's read cache before each flush so external git
+    // usage (terminal, other tools) is picked up by the .git watcher path.
+    refreshScheduler.setInvalidator(scopes => gitService.invalidate([...scopes]));
     context.subscriptions.push(refreshScheduler);
 
     // Initialize more enterprise services that depend on gitService
@@ -101,7 +104,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Autolinks resolve {owner}/{repo} from the active repository's remote
     autolinkService.initialize(context);
     context.subscriptions.push(
-      eventBus.on(EventType.RepositoryChanged, () => void autolinkService.refresh())
+      eventBus.on(EventType.RepositoryChanged, () => void autolinkService.refresh()),
+      // Blame data is stale after history changes (commit/rebase/pull)
+      eventBus.on(EventType.RepositoryChanged, (data: unknown) => {
+        if (changeAffects(data, ['commits'])) {
+          gitBlameService.clearCache();
+        }
+      })
     );
 
     // Content provider backing native diff editors against arbitrary revisions
@@ -257,6 +266,7 @@ function registerEnterpriseCommands(
     vscode.commands.registerCommand('gitNova.enterprise.clearCache', async () => {
       gitBlameService.clearCache();
       gitCodeLensProvider.refresh();
+      gitService.invalidate('*');
       const repoManager = getRepositoryManager();
       if (repoManager) {
         repoManager.clearCache();

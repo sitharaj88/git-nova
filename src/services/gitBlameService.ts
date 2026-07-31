@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
 import { GitService } from '../core/gitService';
 import { logger } from '../utils/logger';
 import { performanceMonitor } from './performanceMonitor';
@@ -71,6 +70,7 @@ const DEFAULT_DECORATION_CONFIG: BlameDecorationConfig = {
  * GitBlameService - Line-by-line git blame with decorations
  */
 export class GitBlameService {
+  private static readonly MAX_CACHE_ENTRIES = 50;
   private static instance: GitBlameService | null = null;
   private gitService: GitService | null = null;
   private blameCache: Map<string, BlameInfo> = new Map();
@@ -281,6 +281,14 @@ export class GitBlameService {
       const result = await this.executeGitBlame(filePath);
       const blameInfo = this.parseBlameOutput(filePath, result);
 
+      // Bound the cache: evict the oldest entry once at capacity, so a long
+      // session browsing many files can't grow blame data without limit.
+      if (this.blameCache.size >= GitBlameService.MAX_CACHE_ENTRIES) {
+        const oldest = this.blameCache.keys().next().value;
+        if (oldest !== undefined) {
+          this.blameCache.delete(oldest);
+        }
+      }
       this.blameCache.set(filePath, blameInfo);
 
       return blameInfo;
@@ -296,24 +304,10 @@ export class GitBlameService {
    * Execute git blame command
    */
   private async executeGitBlame(filePath: string): Promise<string> {
-    const repoPath = this.gitService?.getRepositoryPath();
-    if (!repoPath) {
+    if (!this.gitService?.getRepositoryPath()) {
       throw new Error('Repository path not set');
     }
-
-    return new Promise((resolve, reject) => {
-      exec(
-        `git blame --porcelain "${filePath}"`,
-        { cwd: repoPath, maxBuffer: 50 * 1024 * 1024 },
-        (error: Error | null, stdout: string, stderr: string) => {
-          if (error) {
-            reject(new Error(stderr || error.message));
-          } else {
-            resolve(stdout);
-          }
-        }
-      );
-    });
+    return this.gitService.blameFile(filePath);
   }
 
   /**
