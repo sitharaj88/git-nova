@@ -33,15 +33,20 @@ ${cspMeta(webview, nonce)}
     font-size: ${compact ? '12.5px' : '13.5px'}; margin: 0; display: flex; flex-direction: column;
     overflow: hidden; /* one scroll region only (#scroll) — never a second page scrollbar */ }
 
-  /* Slim, themed scrollbars. The arrow buttons MUST be removed explicitly —
-     they are what forces the wide native track in webviews. */
+  /* Slim, themed scrollbars.
+     Modern Chromium (recent VS Code) honours the STANDARD scrollbar-width /
+     scrollbar-color properties — and once scrollbar-color is set anywhere
+     (VS Code's injected webview defaults set it), all ::-webkit-scrollbar
+     rules are ignored per spec. So the standard properties are the real fix;
+     the webkit rules below only serve older engines. */
+  * { scrollbar-width: thin; }
+  html { scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.45)) transparent; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.35));
     border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100,100,100,0.6)); }
-  ::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground, rgba(100,100,100,0.8)); }
   ::-webkit-scrollbar-corner { background: transparent; }
 
   /* ---------- Header ---------- */

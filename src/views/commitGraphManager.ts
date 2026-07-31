@@ -222,6 +222,10 @@ ${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
   .graph { flex: 1; overflow: auto; }
   .details { width: 360px; border-left: 1px solid var(--vscode-panel-border); overflow: auto; padding: 14px; display: none; }
   .details.show { display: block; }
+  /* Standard properties are what modern webviews honour (webkit rules are
+     ignored once scrollbar-color is set by VS Code's injected defaults). */
+  * { scrollbar-width: thin; }
+  html { scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.45)) transparent; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   ::-webkit-scrollbar-track { background: transparent; }

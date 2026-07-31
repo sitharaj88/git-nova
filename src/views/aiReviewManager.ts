@@ -201,6 +201,8 @@ ${cspMeta(webview, nonce)}
 <title>AI Review</title>
 <style>
   * { box-sizing: border-box; }
+  * { scrollbar-width: thin; }
+  html { scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.45)) transparent; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
   ::-webkit-scrollbar-track { background: transparent; }
