@@ -7,6 +7,7 @@ import {
 } from '../services/repoHealthService';
 import { aiService } from '../services/aiService';
 import { logger } from '../utils/logger';
+import { getNonce, cspMeta } from './webviewHtml';
 
 /**
  * RepoHealthManager — "Repo Doctor" dashboard.
@@ -34,9 +35,9 @@ export class RepoHealthManager {
         'gitNova.repoHealth',
         'Repo Doctor',
         vscode.ViewColumn.Active,
-        { enableScripts: true, retainContextWhenHidden: true }
+        { enableScripts: true }
       );
-      this.panel.webview.html = this.getWebviewContent();
+      this.panel.webview.html = this.getWebviewContent(this.panel.webview);
       this.setupListeners();
     } else {
       this.panel.reveal();
@@ -110,7 +111,18 @@ export class RepoHealthManager {
       return;
     }
     let lastReport: RepoHealthReport | undefined;
+    // Rebuild the webview when the panel becomes visible again (content is not
+    // retained while hidden).
+    let wasVisible = this.panel.visible;
     this.disposables.push(
+      this.panel.onDidChangeViewState(async e => {
+        const visible = e.webviewPanel.visible;
+        if (visible && !wasVisible && this.panel) {
+          this.panel.webview.html = this.getWebviewContent(this.panel.webview);
+          await this.analyze();
+        }
+        wasVisible = visible;
+      }),
       this.panel.webview.onDidReceiveMessage(async msg => {
         if (msg.command === 'refresh') {
           await this.analyze();
@@ -126,11 +138,13 @@ export class RepoHealthManager {
     );
   }
 
-  private getWebviewContent(): string {
+  private getWebviewContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+${cspMeta(webview, nonce)}
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Repo Doctor</title>
 <style>
@@ -171,7 +185,7 @@ export class RepoHealthManager {
   </div>
   <div id="content"><div class="muted">Analyzing…</div></div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     let report = null;
     document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({command:'refresh'}));

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
 import { changeAffects } from '../core/refreshScheduler';
+import { getNonce, cspMeta } from './webviewHtml';
 import { autolinkService } from '../services/autolinkService';
 import { logger } from '../utils/logger';
 
@@ -15,9 +16,12 @@ import { logger } from '../utils/logger';
  * other managers in this folder.
  */
 export class CommitGraphManager {
+  private static readonly PAGE_SIZE = 200;
+
   private panel: vscode.WebviewPanel | undefined;
   private disposables: vscode.Disposable[] = [];
-  private maxCount = 200;
+  /** How many commits the webview currently holds (for --skip pagination). */
+  private loadedCount = 0;
   /** Set when a repo event arrives while the panel is hidden; reload on reveal. */
   private dirty = false;
 
@@ -71,30 +75,57 @@ export class CommitGraphManager {
     await this.load();
   }
 
+  private toWire(commits: import('../models').Commit[]): unknown[] {
+    return commits.map(c => ({
+      hash: c.hash,
+      shortHash: c.shortHash,
+      author: c.author.name,
+      date: c.date.toISOString(),
+      subject: c.message,
+      parents: c.parents,
+      refs: c.refs,
+    }));
+  }
+
   private async load(): Promise<void> {
     if (!this.panel) {
       return;
     }
     try {
+      // Full (re)load covers everything the user has paged in so far, so a
+      // repo change doesn't silently truncate the view back to one page.
+      const count = Math.max(this.loadedCount, CommitGraphManager.PAGE_SIZE);
       const [commits, current] = await Promise.all([
-        this.gitService.getGraphCommits(this.maxCount),
+        this.gitService.getGraphCommits(count),
         this.gitService.getCurrentBranch().catch(() => undefined),
       ]);
+      this.loadedCount = commits.length;
       this.panel.webview.postMessage({
         command: 'render',
         head: current?.name,
-        commits: commits.map(c => ({
-          hash: c.hash,
-          shortHash: c.shortHash,
-          author: c.author.name,
-          date: c.date.toISOString(),
-          subject: c.message,
-          parents: c.parents,
-          refs: c.refs,
-        })),
+        commits: this.toWire(commits),
       });
     } catch (error) {
       logger.error('Failed to load commit graph', error);
+      this.panel.webview.postMessage({ command: 'error', error: String(error) });
+    }
+  }
+
+  /** Fetch only the NEXT page (`--skip`) and append it, instead of re-running
+   *  `git log --all` over everything already shown. */
+  private async loadMore(): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    try {
+      const page = await this.gitService.getGraphCommits(
+        CommitGraphManager.PAGE_SIZE,
+        this.loadedCount
+      );
+      this.loadedCount += page.length;
+      this.panel.webview.postMessage({ command: 'append', commits: this.toWire(page) });
+    } catch (error) {
+      logger.error('Failed to load more commits', error);
       this.panel.webview.postMessage({ command: 'error', error: String(error) });
     }
   }
@@ -143,8 +174,7 @@ export class CommitGraphManager {
             await this.load();
             break;
           case 'loadMore':
-            this.maxCount += 200;
-            await this.load();
+            await this.loadMore();
             break;
           case 'checkout':
             await vscode.commands.executeCommand('gitNova.branch.checkout', msg.hash);
@@ -170,10 +200,12 @@ export class CommitGraphManager {
   }
 
   private getWebviewContent(): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+${this.panel ? cspMeta(this.panel.webview, nonce) : ''}
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Commit Graph</title>
 <style>
@@ -227,21 +259,44 @@ export class CommitGraphManager {
     <div class="details" id="details"></div>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    let all = [], head = null, selected = null;
+    let all = [], head = null, selected = null, filterText = '';
     const LANE_W = 14, ROW_H = 24, DOT_R = 4;
     const COLORS = ['#7C3AED','#06B6D4','#10B981','#F59E0B','#EF4444','#EC4899','#3B82F6','#84CC16'];
+    const graphEl = document.getElementById('graph');
 
     document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({command:'refresh'}));
     document.getElementById('more').addEventListener('click', () => vscode.postMessage({command:'loadMore'}));
-    document.getElementById('search').addEventListener('input', e => renderRows(e.target.value.toLowerCase()));
+
+    // Search hides/shows already-rendered rows — no DOM rebuild per keystroke.
+    let searchTimer;
+    document.getElementById('search').addEventListener('input', e => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { filterText = e.target.value.toLowerCase(); applyFilter(); }, 120);
+    });
+
+    // Single delegated click handler instead of one listener per row.
+    graphEl.addEventListener('click', e => {
+      const row = e.target.closest('.row');
+      if (!row) return;
+      selected = row.getAttribute('data-hash');
+      graphEl.querySelectorAll('.row.sel').forEach(x => x.classList.remove('sel'));
+      row.classList.add('sel');
+      vscode.postMessage({command:'select', hash:selected});
+    });
+
+    document.getElementById('details').addEventListener('click', e => {
+      const btn = e.target.closest('[data-act]');
+      if (btn && selected) vscode.postMessage({command: btn.getAttribute('data-act'), hash: selected});
+    });
 
     window.addEventListener('message', e => {
       const m = e.data;
-      if (m.command === 'render') { all = m.commits; head = m.head; renderRows(''); }
+      if (m.command === 'render') { all = m.commits; head = m.head; renderRows(); }
+      else if (m.command === 'append') { all = all.concat(m.commits); renderRows(); }
       else if (m.command === 'details') showDetails(m.detail);
-      else if (m.command === 'error') document.getElementById('graph').innerHTML = '<div class="error">'+esc(m.error)+'</div>';
+      else if (m.command === 'error') graphEl.innerHTML = '<div class="error">'+esc(m.error)+'</div>';
     });
 
     function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -272,19 +327,14 @@ export class CommitGraphManager {
       return { pos, maxLane };
     }
 
-    function renderRows(filter) {
-      const graph = document.getElementById('graph');
-      if (!all.length) { graph.innerHTML = '<div class="empty">No commits.</div>'; return; }
-      const list = filter
-        ? all.filter(c => (c.subject+' '+c.author+' '+c.hash).toLowerCase().includes(filter))
-        : all;
-      if (!list.length) { graph.innerHTML = '<div class="empty">No matches.</div>'; return; }
+    function renderRows() {
+      if (!all.length) { graphEl.innerHTML = '<div class="empty">No commits.</div>'; return; }
 
       const { pos, maxLane } = computeLanes(all);
       const gw = (maxLane+1) * LANE_W;
 
       let rows = '<table class="rows"><tbody>';
-      list.forEach(c => {
+      all.forEach(c => {
         const p = pos[c.hash] || {lane:0,color:COLORS[0]};
         const dot = '<svg width="'+gw+'" height="'+ROW_H+'">' +
           '<circle cx="'+(p.lane*LANE_W + LANE_W/2)+'" cy="'+(ROW_H/2)+'" r="'+DOT_R+'" fill="'+p.color+'"/></svg>';
@@ -294,7 +344,8 @@ export class CommitGraphManager {
           const cls = isHead ? 'badge head' : isTag ? 'badge tag' : 'badge';
           return '<span class="'+cls+'">'+esc(r.replace(/^tag: /,''))+'</span>';
         }).join('');
-        rows += '<tr class="row'+(selected===c.hash?' sel':'')+'" data-hash="'+c.hash+'">' +
+        const searchKey = esc((c.subject+' '+c.author+' '+c.hash).toLowerCase());
+        rows += '<tr class="row'+(selected===c.hash?' sel':'')+'" data-hash="'+c.hash+'" data-search="'+searchKey+'">' +
           '<td class="gcell">'+dot+'</td>' +
           '<td class="subject">'+badges+esc(c.subject)+'</td>' +
           '<td class="meta">'+esc(c.author)+'</td>' +
@@ -303,16 +354,30 @@ export class CommitGraphManager {
           '</tr>';
       });
       rows += '</tbody></table>';
-      graph.innerHTML = rows;
+      graphEl.innerHTML = rows;
+      applyFilter();
+    }
 
-      graph.querySelectorAll('.row').forEach(r => {
-        r.addEventListener('click', () => {
-          selected = r.getAttribute('data-hash');
-          graph.querySelectorAll('.row').forEach(x=>x.classList.remove('sel'));
-          r.classList.add('sel');
-          vscode.postMessage({command:'select', hash:selected});
-        });
+    function applyFilter() {
+      const rows = graphEl.querySelectorAll('.row');
+      let visible = 0;
+      rows.forEach(r => {
+        const show = !filterText || (r.getAttribute('data-search') || '').includes(filterText);
+        r.hidden = !show;
+        if (show) visible++;
       });
+      let none = document.getElementById('nomatch');
+      if (!visible && rows.length) {
+        if (!none) {
+          none = document.createElement('div');
+          none.id = 'nomatch';
+          none.className = 'empty';
+          none.textContent = 'No matches.';
+          graphEl.appendChild(none);
+        }
+      } else if (none) {
+        none.remove();
+      }
     }
 
     function showDetails(d) {
@@ -325,15 +390,13 @@ export class CommitGraphManager {
         '<div class="d-title">'+(d.messageHtml || esc(d.message))+'</div>' +
         '<div class="d-meta">'+esc(d.author)+'<br>'+new Date(d.date).toLocaleString()+'<br><span class="hashc">'+esc(d.hash)+'</span></div>' +
         '<div class="d-actions">' +
-          '<button onclick="act(\\'checkout\\')">Checkout</button>' +
-          '<button onclick="act(\\'explain\\')">Explain (AI)</button>' +
-          '<button onclick="act(\\'copy\\')">Copy SHA</button>' +
+          '<button data-act="checkout">Checkout</button>' +
+          '<button data-act="explain">Explain (AI)</button>' +
+          '<button data-act="copy">Copy SHA</button>' +
         '</div>' +
         (d.body ? '<div class="body">'+(d.bodyHtml || esc(d.body))+'</div>' : '') +
         '<div class="d-title">Files ('+(d.files||[]).length+')</div>' + files;
     }
-
-    function act(kind){ if(selected) vscode.postMessage({command:kind, hash:selected}); }
 
     function rel(dateStr){
       const diff = Date.now() - new Date(dateStr).getTime();

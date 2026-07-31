@@ -3,6 +3,7 @@ import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
 import { gitHubService, GitHubPullRequest } from '../services/gitHubService';
 import { logger } from '../utils/logger';
+import { getNonce, cspMeta } from './webviewHtml';
 
 /**
  * LaunchpadManager — a unified, actionable hub for the active GitHub
@@ -28,9 +29,9 @@ export class LaunchpadManager {
         'gitNova.launchpad',
         'GitNova Launchpad',
         vscode.ViewColumn.Active,
-        { enableScripts: true, retainContextWhenHidden: true }
+        { enableScripts: true }
       );
-      this.panel.webview.html = this.getWebviewContent();
+      this.panel.webview.html = this.getWebviewContent(this.panel.webview);
       this.setupListeners();
     } else {
       this.panel.reveal();
@@ -55,7 +56,18 @@ export class LaunchpadManager {
     if (!this.panel) {
       return;
     }
+    // Rebuild the webview when the panel becomes visible again (content is not
+    // retained while hidden).
+    let wasVisible = this.panel.visible;
     this.disposables.push(
+      this.panel.onDidChangeViewState(async e => {
+        const visible = e.webviewPanel.visible;
+        if (visible && !wasVisible && this.panel) {
+          this.panel.webview.html = this.getWebviewContent(this.panel.webview);
+          await this.load();
+        }
+        wasVisible = visible;
+      }),
       this.panel.webview.onDidReceiveMessage(async msg => {
         if (msg.command === 'open' && msg.url) {
           await vscode.env.openExternal(vscode.Uri.parse(msg.url));
@@ -91,11 +103,13 @@ export class LaunchpadManager {
     }
   }
 
-  private getWebviewContent(): string {
+  private getWebviewContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+${cspMeta(webview, nonce)}
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>GitNova Launchpad</title>
 <style>
@@ -129,7 +143,7 @@ export class LaunchpadManager {
   </div>
   <div id="content"><div class="empty">Loading…</div></div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({command:'refresh'}));
 
@@ -139,7 +153,9 @@ export class LaunchpadManager {
       else if (m.command === 'error') {
         const signIn = /sign-in/i.test(m.error);
         document.getElementById('content').innerHTML =
-          '<div class="error">' + esc(m.error) + (signIn ? '<br><br><button onclick="vscode.postMessage({command:\\'signIn\\'})">Sign in to GitHub</button>' : '') + '</div>';
+          '<div class="error">' + esc(m.error) + (signIn ? '<br><br><button id="signIn">Sign in to GitHub</button>' : '') + '</div>';
+        const signInBtn = document.getElementById('signIn');
+        if (signInBtn) signInBtn.addEventListener('click', () => vscode.postMessage({command:'signIn'}));
       }
     });
 

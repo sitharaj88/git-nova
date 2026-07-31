@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GitService } from '../core/gitService';
 import { logger } from '../utils/logger';
+import { getNonce, cspMeta } from './webviewHtml';
 
 /**
  * VisualFileHistoryManager — GitLens-style Visual File History panel.
@@ -38,9 +39,9 @@ export class VisualFileHistoryManager {
         'gitNova.visualFileHistory',
         'Visual File History',
         vscode.ViewColumn.Beside,
-        { enableScripts: true, retainContextWhenHidden: true }
+        { enableScripts: true }
       );
-      this.panel.webview.html = this.getWebviewContent();
+      this.panel.webview.html = this.getWebviewContent(this.panel.webview);
       this.setupListeners();
     } else {
       this.panel.reveal();
@@ -79,7 +80,18 @@ export class VisualFileHistoryManager {
     if (!this.panel) {
       return;
     }
+    // Rebuild the webview when the panel becomes visible again (content is not
+    // retained while hidden).
+    let wasVisible = this.panel.visible;
     this.disposables.push(
+      this.panel.onDidChangeViewState(async e => {
+        const visible = e.webviewPanel.visible;
+        if (visible && !wasVisible && this.panel) {
+          this.panel.webview.html = this.getWebviewContent(this.panel.webview);
+          await this.load();
+        }
+        wasVisible = visible;
+      }),
       this.panel.webview.onDidReceiveMessage(async msg => {
         if (msg.command === 'openCommit' && msg.hash) {
           await vscode.commands.executeCommand('gitNova.commit.show', msg.hash);
@@ -94,11 +106,13 @@ export class VisualFileHistoryManager {
     );
   }
 
-  private getWebviewContent(): string {
+  private getWebviewContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+${cspMeta(webview, nonce)}
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Visual File History</title>
 <style>
@@ -153,7 +167,7 @@ export class VisualFileHistoryManager {
   </div>
   <div id="tooltip"></div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const tooltip = document.getElementById('tooltip');
     document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));

@@ -3,6 +3,7 @@ import { GitService } from '../core/gitService';
 import { EventBus, EventType } from '../core/eventBus';
 import { FileDiff } from '../models';
 import { logger } from '../utils/logger';
+import { getNonce, cspMeta } from './webviewHtml';
 
 /**
  * DiffViewManager - Manages the diff viewer webview panel
@@ -40,14 +41,10 @@ export class DiffViewManager {
       'gitNova.diffViewer',
       'Git Diff Viewer',
       vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'webviews/dist')],
-      }
+      { enableScripts: true }
     );
 
-    this.panel.webview.html = this.getWebviewContent();
+    this.panel.webview.html = this.getWebviewContent(this.panel.webview);
     this.setupWebviewListeners();
 
     logger.info('Diff viewer webview shown');
@@ -56,11 +53,13 @@ export class DiffViewManager {
   /**
    * Get webview HTML content
    */
-  private getWebviewContent(): string {
+  private getWebviewContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  ${cspMeta(webview, nonce)}
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Git Diff Viewer</title>
   <style>
@@ -315,7 +314,7 @@ export class DiffViewManager {
     </div>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     let currentMode = 'unstaged';
 
@@ -348,6 +347,10 @@ export class DiffViewManager {
       const message = event.data;
       switch (message.command) {
         case 'showDiff':
+          if (message.mode) {
+            currentMode = message.mode;
+            setActiveButton(message.mode === 'staged' ? 'viewStaged' : 'viewUnstaged');
+          }
           renderDiffs(message.diffs);
           break;
         case 'showEmpty':
@@ -469,7 +472,7 @@ export class DiffViewManager {
         return;
       }
 
-      this.panel.webview.postMessage({ command: 'showDiff', diffs });
+      this.panel.webview.postMessage({ command: 'showDiff', diffs, mode: this.mode });
     } catch (error) {
       logger.error('Failed to load diff', error);
       this.panel?.webview.postMessage({ command: 'showError', error: String(error) });
@@ -508,6 +511,18 @@ export class DiffViewManager {
       }
     });
     this.panelDisposables.push(messageDisposable);
+
+    // Rebuild the webview when the panel becomes visible again (content is not
+    // retained while hidden). The fresh script posts 'ready', which reloads the diff.
+    let wasVisible = this.panel.visible;
+    const viewStateDisposable = this.panel.onDidChangeViewState(e => {
+      const visible = e.webviewPanel.visible;
+      if (visible && !wasVisible && this.panel) {
+        this.panel.webview.html = this.getWebviewContent(this.panel.webview);
+      }
+      wasVisible = visible;
+    });
+    this.panelDisposables.push(viewStateDisposable);
 
     // Handle panel disposal (keep the manager alive so it can reopen)
     const onDidDisposeDisposable = this.panel.onDidDispose(() => {

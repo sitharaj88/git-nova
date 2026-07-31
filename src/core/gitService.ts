@@ -535,13 +535,13 @@ export class GitService {
    * @param maxCount - Maximum commits to return (default 200)
    * @returns Newest-first commits with `parents` and `refs` populated
    */
-  async getGraphCommits(maxCount = 200): Promise<Commit[]> {
-    return this.cache.getOrFetch(`graph:${maxCount}`, 'commits', GitService.TTL_LOG, () =>
-      this.fetchGraphCommits(maxCount)
+  async getGraphCommits(maxCount = 200, skip = 0): Promise<Commit[]> {
+    return this.cache.getOrFetch(`graph:${maxCount}:${skip}`, 'commits', GitService.TTL_LOG, () =>
+      this.fetchGraphCommits(maxCount, skip)
     );
   }
 
-  private async fetchGraphCommits(maxCount: number): Promise<Commit[]> {
+  private async fetchGraphCommits(maxCount: number, skip: number): Promise<Commit[]> {
     logger.debug('Fetching commit graph');
     const SEP = '\x1f';
     try {
@@ -551,6 +551,7 @@ export class GitService {
           '--all',
           '--date-order',
           `--max-count=${maxCount}`,
+          ...(skip > 0 ? [`--skip=${skip}`] : []),
           `--pretty=format:%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%D${SEP}%s`,
         ])
       );

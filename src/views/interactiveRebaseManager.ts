@@ -3,6 +3,7 @@ import { GitService, RebaseTodoCommit } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus, EventType } from '../core/eventBus';
 import { logger } from '../utils/logger';
+import { getNonce, cspMeta } from './webviewHtml';
 
 type RebaseAction = 'pick' | 'reword' | 'squash' | 'fixup' | 'drop';
 
@@ -54,7 +55,7 @@ export class InteractiveRebaseManager {
         vscode.ViewColumn.Active,
         { enableScripts: true, retainContextWhenHidden: true }
       );
-      this.panel.webview.html = this.getWebviewContent();
+      this.panel.webview.html = this.getWebviewContent(this.panel.webview);
       this.setupListeners();
     }
     this.postCommits();
@@ -299,11 +300,13 @@ export class InteractiveRebaseManager {
     }
   }
 
-  private getWebviewContent(): string {
+  private getWebviewContent(webview: vscode.Webview): string {
+    const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+${cspMeta(webview, nonce)}
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Interactive Rebase</title>
 <style>
@@ -355,7 +358,7 @@ export class InteractiveRebaseManager {
   <div class="warn" id="warn"></div>
   <div class="list" id="list"><div class="empty">Loading…</div></div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const ACTIONS = ['pick', 'reword', 'squash', 'fixup', 'drop'];
     let base = null, rows = [], busy = false, dragIndex = -1;
