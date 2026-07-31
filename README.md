@@ -37,16 +37,20 @@ A comprehensive, enterprise-grade Git plugin for Visual Studio Code that provide
 - **Status Bar Integration**: Quick access to branch, status, and sync information, plus blame for the current line
 - **Tree Views**: Native VSCode tree views for branches, commits, stashes, remotes, and tags
 
-### 🤖 AI Assistance
+### 🤖 AI Assistance — every popular model, streaming everywhere
 
-Provider-agnostic AI built on the VS Code Language Model API (works with GitHub Copilot out of the box, no API key required) or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, Ollama, LM Studio, Groq, OpenRouter):
+Native multi-provider AI layer with first-class adapters for **Anthropic (Claude)**, **OpenAI / Azure OpenAI**, **Google Gemini**, the **VS Code Language Model API** (GitHub Copilot, zero-config), and any **OpenAI-compatible** endpoint with one-click presets for **Ollama, LM Studio, Groq, OpenRouter, Mistral, xAI, DeepSeek, and Zhipu GLM**. Pick a provider and model from the status bar (`✦`) or `GitNova: Select AI Model` — model lists are fetched live from each provider.
 
-- **AI commit messages** — generate Conventional Commits-style messages from your staged diff, mirroring your repository's existing style
-- **Explain commit** — get a concise, reviewer-focused explanation of any commit's changes and risks
-- **Explain current changes** — summarize your working-tree/staged diff before committing
-- **AI merge-conflict resolution** — proposes a merged version of each conflicted file and shows it as a *diff to review before applying*
-- **AI code review** — reviews your diff and *fuses the editor's own linter/compiler diagnostics* into a severity-grouped report
-- **Bring your own key** — API keys stored securely in VS Code SecretStorage, never in settings
+- **AI Assistant chat** — a Claude-style chat in the sidebar (or as a full editor panel) grounded in your repository: it reads status, history, diffs, blame and branches through safe read-only tools, streams responses with a typewriter animation and syntax-highlighted code, includes your active file/selection as context, and keeps **persistent per-project chat history**
+- **AI Review Panel** — structured findings (file, line, severity) with jump-to-line, severity filters, and confirm-then-apply fix suggestions; scoped to staged, working-tree, or branch-vs-base changes
+- **Natural-language commit search** — ask "when did we change the auth token handling?" and GitNova translates it into git filters and runs them locally
+- **Changelog / release notes generation** between any two refs, streamed with save-to-file
+- **AI branch name suggestions** from a description or your current diff
+- **AI commit messages** — Conventional Commits-style messages from your staged diff, mirroring your repository's existing style
+- **Explain commit / explain current changes** — streamed, reviewer-focused explanations
+- **AI merge-conflict resolution** — proposes a merged version of each conflicted file as a *diff to review before applying*
+- **AI code review (markdown)** — fuses the editor's own linter/compiler diagnostics into a severity-grouped report
+- **Bring your own keys** — per-provider API keys stored securely in VS Code SecretStorage, never in settings
 
 ### 🔎 Git CodeLens
 

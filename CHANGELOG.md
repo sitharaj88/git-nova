@@ -2,6 +2,44 @@
 
 All notable changes to the "GitNova" extension will be documented in this file.
 
+## [3.0.0] - 2026-08-01
+
+A major release on two fronts: a ground-up **multi-provider AI platform** with a real chat assistant, and a **deep performance overhaul** of the refresh/git-process architecture.
+
+### Added — AI
+
+- **Multi-provider AI layer**: first-class adapters for **Anthropic (Claude)**, **OpenAI / Azure OpenAI** (auto-detected from the base URL), **Google Gemini**, the **VS Code Language Model API** (Copilot), and any **OpenAI-compatible** endpoint with one-click presets for **Ollama, LM Studio, Groq, OpenRouter, Mistral, xAI, DeepSeek, and Zhipu GLM**. Streaming-first (SSE) with no SDK dependencies; per-provider API keys in SecretStorage (the legacy single key migrates automatically).
+- `GitNova: Select AI Model` — guided provider → preset → model picker with **live model listing** from each provider, plus a status bar item (`✦ model`) showing what's active.
+- **AI Assistant chat** (`gitNova.aiChat` view + `GitNova: Open AI Chat (Editor Panel)`): Claude-style chat grounded in the repository via a strict **read-only git tool loop** (status, log, diff, show, blame, branches) that works on every provider. Persistent **per-workspace chat history** with session switching/deletion, repo context (branch, ahead/behind, recent commits) and optional active-file/selection context on every turn, adaptive typewriter streaming, syntax-highlighted code blocks with copy buttons, markdown tables, and animated tool chips.
+- **AI Review Panel** (`GitNova: AI Review Panel`): structured findings with file/line/severity, jump-to-line, severity filter chips, and confirm-then-apply suggestions; review staged, working-tree, or branch-vs-merge-base changes. Falls back to a markdown report if the model returns unstructured output.
+- **Streaming output panel**: explain-commit, explain-changes, review, changelog and Repo Doctor AI analysis now stream token-by-token with a Stop button instead of spinner-then-dump.
+- **Semantic history tools**: `Search Commits with AI` (natural-language → local git filters, including pickaxe), `Generate Changelog / Release Notes (AI)` between any two refs with save-to-file, and `Suggest Branch Name (AI)` with create-and-switch.
+- New AI settings: `gitNova.ai.preset`, `gitNova.ai.maxTokens`, `gitNova.ai.azureApiVersion`; `gitNova.ai.provider` now accepts `anthropic`, `openai`, `gemini`.
+
+### Added — Git
+
+- **Real branch ahead/behind and upstream tracking** in the branches view and source-control overview (previously always rendered as 0 / none).
+
+### Performance
+
+- **Coalesced refresh pipeline**: one debounced, scope-aware refresh per change instead of multiple full fan-outs to every view; tree views only refresh the data they show, and hidden views defer refreshing until reopened.
+- **Removed the workspace-wide file watcher** that ran `git status` for every file event in the workspace (builds, `npm install`, test output).
+- **Git result caching** with in-flight deduplication and precise invalidation (from GitNova's own operations and the `.git` watcher for terminal git usage).
+- **Far fewer git processes**: tags now load with one `for-each-ref` instead of 2 per tag; local+remote branches with one process; commit details with one `git show` instead of three; HEAD via `rev-parse`. Read commands no longer take the index lock (`GIT_OPTIONAL_LOCKS=0`).
+- **Faster activation**: single cheap repo validation (was two full `git status` runs), webview managers constructed lazily on first open, non-critical services deferred until after activation, CodeLens registered only while enabled, auto-refresh paused while the window is unfocused.
+- **Webview performance**: commit graph "Load more" now fetches only the next page (`--skip`) and appends; search filters rows without re-rendering; performance monitoring is wired end-to-end (`GitNova: Show Performance Report` now shows real activation/git/cache metrics).
+
+### Changed
+
+- **Commit graph redesigned**: proper graph rails — continuous colored branch lines with rounded merge/fork curves — instead of disconnected dots; slim themed scrollbars across all GitNova webviews.
+- All webviews hardened with Content-Security-Policy + script nonces.
+- Saving an AI API key now offers to switch the active provider immediately (previously requests silently kept using the old provider).
+
+### Fixed
+
+- `gitNova.commit.create` ignored the message passed by the commit template wizard.
+- Custom OpenAI base URLs were silently ignored (traffic always went to api.openai.com).
+
 ## [2.1.0] - 2026-07-03
 
 ### Added
