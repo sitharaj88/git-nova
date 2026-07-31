@@ -949,6 +949,24 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "gitNova.ai.chat.openPanel",
+        "title": "GitNova: Open AI Chat (Editor Panel)",
+        "category": "GitNova",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "gitNova.ai.chat.new",
+        "title": "GitNova: New AI Chat",
+        "category": "GitNova",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gitNova.ai.chat.history",
+        "title": "GitNova: AI Chat History",
+        "category": "GitNova",
+        "icon": "$(history)"
+      },
+      {
         "command": "gitNova.codeLens.toggle",
         "title": "GitNova: Toggle Git CodeLens (Authorship)",
         "category": "GitNova",
@@ -1227,6 +1245,21 @@
         {
           "command": "gitNova.github.createPullRequest",
           "when": "view == gitNova.pullRequests",
+          "group": "navigation@3"
+        },
+        {
+          "command": "gitNova.ai.chat.new",
+          "when": "view == gitNova.aiChat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitNova.ai.chat.history",
+          "when": "view == gitNova.aiChat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "gitNova.ai.chat.openPanel",
+          "when": "view == gitNova.aiChat",
           "group": "navigation@3"
         }
       ],

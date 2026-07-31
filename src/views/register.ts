@@ -9,7 +9,8 @@ import { InteractiveRebaseManager } from './interactiveRebaseManager';
 import { LaunchpadManager } from './launchpadManager';
 import { RepoHealthManager } from './repoHealthManager';
 import { AiReviewManager } from './aiReviewManager';
-import { AiChatViewProvider } from './aiChatViewProvider';
+import { AiChatPanel, AiChatViewProvider } from './aiChatViewProvider';
+import { ChatController } from './aiChat/chatController';
 import { createRepoHealthService } from '../services/repoHealthService';
 import { AiCommands, DiffCommands, RebaseCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
@@ -54,6 +55,8 @@ export function registerWebviews(
     track(new RepoHealthManager(context, gitService, createRepoHealthService(gitService)))
   );
   const getAiReviewManager = lazy(() => track(new AiReviewManager(context, gitService)));
+  const chatController = new ChatController(context, gitService, repositoryManager);
+  const getChatPanel = lazy(() => track(new AiChatPanel(chatController)));
 
   context.subscriptions.push(
     // Visual File History (accepts a resource Uri from editor/explorer menus)
@@ -87,12 +90,25 @@ export function registerWebviews(
     vscode.commands.registerCommand(AiCommands.Review, async () => {
       await getAiReviewManager().review();
     }),
-    // Repo chat sidebar. The provider is cheap until the view is first opened;
-    // registration itself must happen at activation for VS Code to resolve it.
+    // Repo chat: one controller (sessions, tool loop, persistence) shared by
+    // the sidebar view and the editor-panel host so both render the same
+    // conversation live. Registration must happen at activation; the
+    // controller itself is cheap until a chat is opened.
+    chatController,
     vscode.window.registerWebviewViewProvider(
       AiChatViewProvider.viewId,
-      new AiChatViewProvider(gitService, repositoryManager)
-    )
+      new AiChatViewProvider(chatController)
+    ),
+    vscode.commands.registerCommand('gitNova.ai.chat.openPanel', () => {
+      getChatPanel().show();
+    }),
+    vscode.commands.registerCommand('gitNova.ai.chat.new', async () => {
+      await chatController.newChat();
+      await vscode.commands.executeCommand('gitNova.aiChat.focus');
+    }),
+    vscode.commands.registerCommand('gitNova.ai.chat.history', async () => {
+      await chatController.showHistoryPicker();
+    })
   );
 
   logger.info('Webviews registered (lazy)');
