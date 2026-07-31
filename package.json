@@ -925,6 +925,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "gitNova.ai.review",
+        "title": "GitNova: AI Review Panel (Findings)",
+        "category": "GitNova",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "gitNova.codeLens.toggle",
         "title": "GitNova: Toggle Git CodeLens (Authorship)",
         "category": "GitNova",

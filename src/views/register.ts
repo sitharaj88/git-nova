@@ -8,8 +8,9 @@ import { CommitGraphManager } from './commitGraphManager';
 import { InteractiveRebaseManager } from './interactiveRebaseManager';
 import { LaunchpadManager } from './launchpadManager';
 import { RepoHealthManager } from './repoHealthManager';
+import { AiReviewManager } from './aiReviewManager';
 import { createRepoHealthService } from '../services/repoHealthService';
-import { DiffCommands, RebaseCommands } from '../constants/commands';
+import { AiCommands, DiffCommands, RebaseCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
 
 /** Memoize a factory so the instance is created on first use only. */
@@ -51,6 +52,7 @@ export function registerWebviews(
   const getRepoHealthManager = lazy(() =>
     track(new RepoHealthManager(context, gitService, createRepoHealthService(gitService)))
   );
+  const getAiReviewManager = lazy(() => track(new AiReviewManager(context, gitService)));
 
   context.subscriptions.push(
     // Visual File History (accepts a resource Uri from editor/explorer menus)
@@ -79,6 +81,10 @@ export function registerWebviews(
     // Rich unified diff viewer (optional alternative to the native diff editors)
     vscode.commands.registerCommand(DiffCommands.OpenViewer, async (filePath?: string) => {
       await getDiffViewManager().showDiff(filePath);
+    }),
+    // Structured AI code review panel (findings with jump-to-line + apply)
+    vscode.commands.registerCommand(AiCommands.Review, async () => {
+      await getAiReviewManager().review();
     })
   );
 
