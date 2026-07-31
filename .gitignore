@@ -46,3 +46,8 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Release artifacts (published to GitHub Releases, not tracked)
+*.vsix
+RELEASE_NOTES_*.md
+release-banner.html
