@@ -3,7 +3,6 @@ import { GitService } from '../core/gitService';
 import { RepositoryManager } from '../core/repositoryManager';
 import { EventBus } from '../core/eventBus';
 import { DiffViewManager } from './diffViewManager';
-import { CommitHistoryManager } from './commitHistoryManager';
 import { VisualFileHistoryManager } from './visualFileHistoryManager';
 import { CommitGraphManager } from './commitGraphManager';
 import { InteractiveRebaseManager } from './interactiveRebaseManager';
@@ -13,74 +12,75 @@ import { createRepoHealthService } from '../services/repoHealthService';
 import { DiffCommands, RebaseCommands } from '../constants/commands';
 import { logger } from '../utils/logger';
 
+/** Memoize a factory so the instance is created on first use only. */
+function lazy<T>(create: () => T): () => T {
+  let value: T | undefined;
+  return () => (value ??= create());
+}
+
+/**
+ * Register webview commands. Managers are constructed lazily on first open —
+ * an unopened panel costs nothing at activation (no instance, no event
+ * subscriptions). Disposal is handled per-instance via context.subscriptions
+ * at creation time.
+ */
 export function registerWebviews(
   context: vscode.ExtensionContext,
   gitService: GitService,
   repositoryManager: RepositoryManager,
   eventBus: EventBus
 ): void {
-  // Create webview manager instances
-  const diffViewManager = new DiffViewManager(context, gitService, eventBus);
-  const commitHistoryManager = new CommitHistoryManager(context, gitService, eventBus);
-  const visualFileHistoryManager = new VisualFileHistoryManager(context, gitService);
-  const commitGraphManager = new CommitGraphManager(context, gitService, eventBus);
-  const interactiveRebaseManager = new InteractiveRebaseManager(
-    context,
-    gitService,
-    repositoryManager,
-    eventBus
-  );
-  const launchpadManager = new LaunchpadManager(context, repositoryManager, eventBus);
-  const repoHealthManager = new RepoHealthManager(
-    context,
-    gitService,
-    createRepoHealthService(gitService)
-  );
+  const track = <T extends vscode.Disposable>(instance: T): T => {
+    context.subscriptions.push(instance);
+    return instance;
+  };
 
-  // Expose managers for use in commands
-  (globalThis as any).diffViewManager = diffViewManager;
-  (globalThis as any).commitHistoryManager = commitHistoryManager;
-  (globalThis as any).visualFileHistoryManager = visualFileHistoryManager;
-  (globalThis as any).commitGraphManager = commitGraphManager;
-  (globalThis as any).interactiveRebaseManager = interactiveRebaseManager;
-  (globalThis as any).launchpadManager = launchpadManager;
-  (globalThis as any).repoHealthManager = repoHealthManager;
+  const getDiffViewManager = lazy(() => track(new DiffViewManager(context, gitService, eventBus)));
+  const getVisualFileHistoryManager = lazy(() =>
+    track(new VisualFileHistoryManager(context, gitService))
+  );
+  const getCommitGraphManager = lazy(() =>
+    track(new CommitGraphManager(context, gitService, eventBus))
+  );
+  const getInteractiveRebaseManager = lazy(() =>
+    track(new InteractiveRebaseManager(context, gitService, repositoryManager, eventBus))
+  );
+  const getLaunchpadManager = lazy(() =>
+    track(new LaunchpadManager(context, repositoryManager, eventBus))
+  );
+  const getRepoHealthManager = lazy(() =>
+    track(new RepoHealthManager(context, gitService, createRepoHealthService(gitService)))
+  );
 
   context.subscriptions.push(
     // Visual File History (accepts a resource Uri from editor/explorer menus)
     vscode.commands.registerCommand(
       'gitNova.visualFileHistory.show',
       async (resource?: vscode.Uri) => {
-        await visualFileHistoryManager.show(resource?.fsPath);
+        await getVisualFileHistoryManager().show(resource?.fsPath);
       }
     ),
     // Interactive Commit Graph workbench
     vscode.commands.registerCommand('gitNova.commitGraph.show', async () => {
-      await commitGraphManager.show();
+      await getCommitGraphManager().show();
     }),
     // Visual interactive rebase editor
     vscode.commands.registerCommand(RebaseCommands.InteractiveEditor, async () => {
-      await interactiveRebaseManager.show();
+      await getInteractiveRebaseManager().show();
     }),
     // Launchpad hub
     vscode.commands.registerCommand('gitNova.launchpad.show', async () => {
-      await launchpadManager.show();
+      await getLaunchpadManager().show();
     }),
     // Repo Doctor — repository health dashboard
     vscode.commands.registerCommand('gitNova.repoHealth.show', async () => {
-      await repoHealthManager.show();
+      await getRepoHealthManager().show();
     }),
     // Rich unified diff viewer (optional alternative to the native diff editors)
     vscode.commands.registerCommand(DiffCommands.OpenViewer, async (filePath?: string) => {
-      await diffViewManager.showDiff(filePath);
-    }),
-    diffViewManager,
-    commitGraphManager,
-    interactiveRebaseManager,
-    visualFileHistoryManager,
-    launchpadManager,
-    repoHealthManager
+      await getDiffViewManager().showDiff(filePath);
+    })
   );
 
-  logger.info('Webviews registered successfully');
+  logger.info('Webviews registered (lazy)');
 }

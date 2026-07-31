@@ -18,21 +18,36 @@ export class GitCodeLensProvider implements vscode.CodeLensProvider {
   readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
 
   private disposables: vscode.Disposable[] = [];
+  private registration: vscode.Disposable | null = null;
 
   initialize(context: vscode.ExtensionContext): void {
-    const selector: vscode.DocumentSelector = { scheme: 'file' };
+    // Register the provider only while enabled. A registered CodeLens
+    // provider gets provideCodeLenses calls (and thus blame passes) for every
+    // visible file even when the setting would make it return [] — so toggle
+    // the registration itself on config changes instead of checking inside.
+    this.updateRegistration();
+
     this.disposables.push(
-      vscode.languages.registerCodeLensProvider(selector, this),
-      // Refresh lenses when blame-affecting settings change or files are saved.
       vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('gitNova.codeLens') || e.affectsConfiguration('gitNova.blame')) {
+          this.updateRegistration();
           this.refresh();
         }
       }),
-      vscode.workspace.onDidSaveTextDocument(() => this.refresh())
+      vscode.workspace.onDidSaveTextDocument(() => this.refresh()),
+      { dispose: () => this.registration?.dispose() }
     );
     context.subscriptions.push(...this.disposables);
     logger.info('GitCodeLensProvider initialized');
+  }
+
+  private updateRegistration(): void {
+    if (this.enabled && !this.registration) {
+      this.registration = vscode.languages.registerCodeLensProvider({ scheme: 'file' }, this);
+    } else if (!this.enabled && this.registration) {
+      this.registration.dispose();
+      this.registration = null;
+    }
   }
 
   refresh(): void {

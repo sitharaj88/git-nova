@@ -89,20 +89,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshScheduler.setInvalidator(scopes => gitService.invalidate([...scopes]));
     context.subscriptions.push(refreshScheduler);
 
-    // Initialize more enterprise services that depend on gitService
-    branchProtectionManager.initialize(context);
-    commitTemplateManager.initialize(context);
-    worktreeManager.initialize(context, gitService);
-    gitBlameService.initialize(context, gitService);
+    // Cheap initializations that commands depend on immediately
     aiService.initialize(context);
-    gitCodeLensProvider.initialize(context);
     gitHubService.initialize(gitService);
 
     // Detect and set active repository
     await detectAndSetActiveRepository(repositoryManager);
 
-    // Autolinks resolve {owner}/{repo} from the active repository's remote
-    autolinkService.initialize(context);
+    // Defer heavier services (editor listeners, blame, CodeLens, autolinks)
+    // off the activation critical path — they initialize right after
+    // activation completes, long before any user interaction needs them.
+    setImmediate(() => {
+      try {
+        branchProtectionManager.initialize(context);
+        commitTemplateManager.initialize(context);
+        worktreeManager.initialize(context, gitService);
+        gitBlameService.initialize(context, gitService);
+        gitCodeLensProvider.initialize(context);
+        // Autolinks resolve {owner}/{repo} from the active repository's remote
+        autolinkService.initialize(context);
+        void workspaceStateManager.startSession();
+        logger.debug('Deferred services initialized');
+      } catch (error) {
+        logger.error('Deferred service initialization failed', error);
+      }
+    });
     context.subscriptions.push(
       eventBus.on(EventType.RepositoryChanged, () => void autolinkService.refresh()),
       // Blame data is stale after history changes (commit/rebase/pull)
@@ -154,8 +165,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setupAutoRefresh();
     context.subscriptions.push({ dispose: () => stopAutoRefresh() });
 
-    // Start session tracking
-    await workspaceStateManager.startSession();
+    // Catch up once when the window regains focus (auto-refresh pauses while
+    // unfocused)
+    context.subscriptions.push(
+      vscode.window.onDidChangeWindowState(e => {
+        if (e.focused && repositoryManager.getActiveRepository()) {
+          refreshScheduler.request(['status', 'operation'], 'focusRegained');
+        }
+      })
+    );
 
     // Log activation success
     const activeRepo = repositoryManager.getActiveRepository();
@@ -749,48 +767,34 @@ async function detectAndSetActiveRepository(repositoryManager: RepositoryManager
   logger.info(`Detected workspace: ${workspacePath}`);
 
   try {
-    // First check if the workspace is a valid git repository
-    const gitService = getGitService();
-    if (gitService) {
-      const isValid = await gitService.isValidRepository(workspacePath);
-
-      if (!isValid) {
-        logger.warn(`Workspace is not a git repository: ${workspacePath}`);
-
-        // Provide actionable options to the user
-        const message =
-          'This workspace is not a git repository. Some features may not work correctly.';
-        const initializeAction = 'Initialize Git Repository';
-        const selection = await vscode.window.showWarningMessage(
-          message,
-          initializeAction,
-          'Close'
-        );
-
-        if (selection === initializeAction) {
-          try {
-            await gitService.init(workspacePath);
-            await repositoryManager.setActiveRepository(workspacePath);
-            vscode.window.showInformationMessage('Git repository initialized successfully!');
-            return;
-          } catch (initError) {
-            logger.error('Failed to initialize git repository', initError);
-            vscode.window.showErrorMessage(`Failed to initialize git repository: ${initError}`);
-            return;
-          }
-        } else {
-          return;
-        }
-      }
-    }
-
+    // Set directly — setActiveRepository validates the path itself, so the
+    // old separate isValidRepository pre-check doubled the git work on the
+    // blocking activation path for nothing.
     await repositoryManager.setActiveRepository(workspacePath);
     logger.info('Active repository set successfully');
   } catch (error) {
-    logger.error('Failed to set active repository', error);
-    vscode.window.showWarningMessage(
-      'Failed to detect git repository. Some features may not work correctly.'
-    );
+    logger.warn(`Workspace is not a git repository: ${workspacePath}`);
+    // Non-blocking prompt — activation must not wait on user input
+    const initializeAction = 'Initialize Git Repository';
+    void vscode.window
+      .showWarningMessage(
+        'This workspace is not a git repository. Some features may not work correctly.',
+        initializeAction,
+        'Close'
+      )
+      .then(async selection => {
+        if (selection !== initializeAction) {
+          return;
+        }
+        try {
+          await getGitService().init(workspacePath);
+          await repositoryManager.setActiveRepository(workspacePath);
+          vscode.window.showInformationMessage('Git repository initialized successfully!');
+        } catch (initError) {
+          logger.error('Failed to initialize git repository', initError);
+          vscode.window.showErrorMessage(`Failed to initialize git repository: ${initError}`);
+        }
+      });
   }
 }
 
@@ -812,6 +816,11 @@ function setupAutoRefresh(): void {
 
   autoRefreshTimer = setInterval(() => {
     try {
+      // Skip ticks while the window is unfocused — the focus listener below
+      // catches the UI up when the user returns.
+      if (!vscode.window.state.focused) {
+        return;
+      }
       if (repositoryManager.getActiveRepository()) {
         // Cheap scoped request (status only) instead of the old full cache
         // clear + 5-process refresh + DiffChanged fan-out per tick.

@@ -194,10 +194,12 @@ export class GitService {
   async setRepositoryPath(path: string): Promise<void> {
     logger.info(`Setting repository path to: ${path}`);
 
-    // Validate that the path is a valid git repository
+    // Validate that the path is a valid git repository. `rev-parse --git-dir`
+    // is a near-instant check — unlike `status`, it never scans the worktree,
+    // which matters on large repos since this sits on the activation path.
     try {
       const testGit = GitService.createGit(path);
-      await testGit.status();
+      await testGit.raw(['rev-parse', '--git-dir']);
       this.repositoryPath = path;
       this.gitDirCache = null;
       this.git = testGit;
