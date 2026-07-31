@@ -299,7 +299,31 @@ export class AIService {
       return;
     }
     await this.secrets.set(target, key.trim());
-    vscode.window.showInformationMessage(`GitNova: ${PROVIDER_LABELS[target]} API key saved.`);
+
+    // Saving a key alone does NOT change which provider handles requests —
+    // offer the switch right here so users don't stay on Copilot unknowingly.
+    if (target !== this.getProvider()) {
+      const switchNow = await vscode.window.showInformationMessage(
+        `${PROVIDER_LABELS[target]} API key saved. GitNova is currently using ` +
+          `${PROVIDER_LABELS[this.getProvider()]} — switch to ${PROVIDER_LABELS[target]} now?`,
+        'Switch',
+        'Keep current'
+      );
+      if (switchNow === 'Switch') {
+        await this.config().update('ai.provider', target, vscode.ConfigurationTarget.Global);
+        if (target === 'openai-compatible' && !this.config().get<string>('ai.baseUrl', '')) {
+          // A compatible endpoint is unusable without a base URL — run the
+          // guided picker (preset → base URL → model).
+          await this.selectModel();
+        } else {
+          vscode.window.showInformationMessage(
+            `GitNova AI now uses ${PROVIDER_LABELS[target]} — ${this.getActiveModel().model}.`
+          );
+        }
+      }
+    } else {
+      vscode.window.showInformationMessage(`GitNova: ${PROVIDER_LABELS[target]} API key saved.`);
+    }
   }
 
   dispose(): void {

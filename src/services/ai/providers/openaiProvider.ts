@@ -105,13 +105,10 @@ export class OpenAiProvider implements AiProviderAdapter {
   }
 
   private resolveBase(): string {
-    const configured = this.ctx.getBaseUrl();
-    // Only honour a custom base URL that is clearly OpenAI/Azure — the
-    // baseUrl setting is shared with the openai-compatible provider.
-    if (configured && (this.isAzure(configured) || /api\.openai\.com/i.test(configured))) {
-      return configured;
-    }
-    return OPENAI_BASE_URL;
+    // Honour whatever base URL the user configured (Azure, a proxy, or a
+    // vendor endpoint) — silently ignoring it sent traffic to api.openai.com
+    // and confused users who expected their endpoint to be used.
+    return this.ctx.getBaseUrl() || OPENAI_BASE_URL;
   }
 
   private async buildAuth(baseUrl: string): Promise<Record<string, string>> {
@@ -144,9 +141,12 @@ export class OpenAiProvider implements AiProviderAdapter {
     try {
       const base = this.resolveBase();
       const live = await listChatModels('openai', base, await this.buildAuth(base));
-      // The raw list is huge; keep chat-relevant families on top, fall back to static.
-      const filtered = live.filter(m => /^(gpt|o\d|chatgpt)/i.test(m.id));
-      return filtered.length > 0 ? filtered : STATIC_MODELS.openai;
+      if (/api\.openai\.com/i.test(base)) {
+        // The official list is huge; surface the chat-relevant families.
+        const filtered = live.filter(m => /^(gpt|o\d|chatgpt)/i.test(m.id));
+        return filtered.length > 0 ? filtered : STATIC_MODELS.openai;
+      }
+      return live.length > 0 ? live : STATIC_MODELS.openai;
     } catch {
       return STATIC_MODELS.openai;
     }
